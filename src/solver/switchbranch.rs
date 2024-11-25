@@ -1,5 +1,8 @@
 use core::alloc;
-use std::{ops::DerefMut, sync::{Arc, Mutex}};
+use std::{
+    ops::DerefMut,
+    sync::{Arc, Mutex},
+};
 
 use crate::render::RenderAllocation;
 
@@ -29,6 +32,32 @@ pub fn backtrack<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
     }
 }
 
+pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(allocations: &[Allocation<F, A, I>], q1: F, p_min: F, epsilon: F, max_iter: usize) -> Option<(usize, F)> {
+    let mut p_dc = F::zero();
+    let mut l_dc: Option<usize> = None;
+    for (l, alloc) in allocations.iter().enumerate() {
+        if alloc.agent().income() > p_min + epsilon {
+            if alloc.agent().utility(p_min, q1) > alloc.utility() {
+                // We have a double crossing.
+                let p_indif = alloc.indifferent_price(
+                    q1,
+                    epsilon,
+                    max_iter,
+                )
+                .ok_or(SBError::NoIndifference)
+                .unwrap();
+
+                if l_dc.is_none() || p_indif > p_dc {
+                    p_dc = p_indif;
+                    l_dc = Some(l);
+                }
+            }
+        }
+    }
+
+    l_dc.map(|x| (x, p_dc))
+}
+
 pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     agents: &mut Vec<A>,
     items: &mut Vec<I>,
@@ -36,7 +65,7 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
     mut n: usize,
     epsilon: F,
     max_iter: usize,
-    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>
+    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
 ) -> SBResult<Vec<Allocation<F, A, I>>> {
     assert_eq!(agents.len(), items.len());
     if items.is_empty() {
@@ -56,7 +85,8 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                 .last()
                 .unwrap()
                 .indifferent_price(q, epsilon, max_iter)
-                .ok_or(SBError::NoIndifference).unwrap(),
+                .ok_or(SBError::NoIndifference)
+                .unwrap(),
         )
     };
 
@@ -86,7 +116,9 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                     agent.income(),
                     epsilon,
                     max_iter,
-                ).ok_or(SBError::NoIndifference).unwrap();
+                )
+                .ok_or(SBError::NoIndifference)
+                .unwrap();
 
                 if to_allocate.is_none() || p_indif < p_min {
                     p_min = p_indif;
@@ -94,55 +126,68 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                 }
             }
             // Check if there would be a double crossing...
-            let mut p_dc = F::zero();
-            let mut l_dc: Option<usize> = None;
-            for (l, alloc) in allocations.iter().enumerate() {
-                if alloc.agent().income() > p_min {
-                    if alloc.agent().utility(p_min, q1) > alloc.utility() {
-                        // We have a double crossing.
-                        let p_indif = indifferent_price(
-                            alloc.agent(),
-                            q1,
-                            alloc.utility(),
-                            p_min,
-                            alloc.agent().income(),
-                            epsilon,
-                            max_iter,
-                        ).ok_or(SBError::NoIndifference).unwrap();
 
-                        if l_dc.is_none() || p_indif > p_dc {
-                            p_dc = p_indif;
-                            l_dc = Some(l);
-                        }
-                    }
-                }
-            }
+            let mut dc = false; 
 
-            if let Some(l_dc) = l_dc {
-                // Go back to the dc agent and try to go under, if we cant, allocate this agent above.
-                let sub_n = allocations.len() - l_dc + 1;
+            let mut q_next = q1;
+            let mut p_next = p_min;
+
+            // This could cause a further double crossing - we only know that the allocation of the previous agent is valid, but we don't know
+            // if the next allocation will be valid, and since right alignment means that allocations are done using p0, q0, without checking
+            // validity, we need to check this now.
+            while let Some((l_dc, _)) = check_dc(&allocations, q_next, p_next, epsilon, max_iter) {
+                dc = true;
+                // We do not want to remove the dc agent because we want to try to allocate under it.
+                // If this does not work then it will be shifted above, but by the align_right function.
+                //
+                let sub_n = allocations.len() - l_dc - 1;
                 backtrack(agents, items, &mut allocations, sub_n);
-                println!("switchright: {}, {}", allocations.len(), sub_n);
+                println!("switchright: {}, {}", allocations.len(), sub_n); 
                 // Allocate over.
-                allocations =
-                    align_right(agents, items, allocations, sub_n, epsilon, max_iter, render_pipe.clone())?;
+                allocations = align_right(
+                    agents,
+                    items,
+                    allocations,
+                    sub_n + 1, // +1 ensures that we make progress and dont have infinite switching.
+                    epsilon,
+                    max_iter,
+                    render_pipe.clone(),
+                )?;
 
                 if let Some(last) = allocations.last() {
-                    q0 = last.quality();
-                    p0 = last.price();
-                } else {
-                    q0 = F::zero();
-                    p0 = F::zero();
-                }
-                *render_pipe.lock().unwrap().deref_mut() = Some(allocations.iter().map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter)).collect());
-            } else {
-                // We have a valid allocation.
-                let alloc = Allocation::new(agents.remove(to_allocate.ok_or(SBError::NoCandidate)?), items.remove(0), p0);
-                allocations.push(alloc);
+                    if let Some(next_item) = items.last() {
+                        q_next = next_item.quality();
+                        p_next = last
+                            .indifferent_price(q0, epsilon, max_iter)
+                            .ok_or(SBError::NoIndifference)
+                            .unwrap();
 
-                q0 = q1;
-                p0 = p_min;
+                    }
+                } else {
+                    q_next = F::zero();
+                    p_next = F::zero();
+                    // Checking dc should be vacuously true.
+                }
+                *render_pipe.lock().unwrap().deref_mut() = Some(
+                    allocations
+                        .iter()
+                        .map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter))
+                        .collect(),
+                );
+            } 
+
+            if !dc {
+                // We have a valid allocation.
+                let alloc = Allocation::new(
+                    agents.remove(to_allocate.ok_or(SBError::NoCandidate)?),
+                    items.remove(0),
+                    p0,
+                );
+                allocations.push(alloc);
             }
+
+            q0 = q_next;
+            p0 = p_next;
         }
     }
 
@@ -156,7 +201,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
     mut n: usize,
     epsilon: F,
     max_iter: usize,
-    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>
+    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
 ) -> SBResult<Vec<Allocation<F, A, I>>> {
     let mut q0: F = F::zero();
     let mut p0: F = F::zero();
@@ -174,7 +219,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
         // Find the steepest agent.
         let mut to_allocate: Option<usize> = None;
 
-        let q1 = items[0].quality();
+        let q1 = items.first().unwrap().quality();
         let mut p_min = F::zero();
         for (a, agent) in agents.iter().enumerate() {
             if agent.income() <= p0 {
@@ -188,7 +233,9 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
                 agent.income(),
                 epsilon,
                 max_iter,
-            ).ok_or(SBError::NoIndifference).expect(&format!("FAILED: {}, n= {}", allocations.len(), n));
+            )
+            .ok_or(SBError::NoIndifference)
+            .expect(&format!("FAILED: {}, n= {}", allocations.len(), n));
 
             if to_allocate.is_none() || p_indif < p_min {
                 p_min = p_indif;
@@ -196,54 +243,45 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
             }
         }
         // Check if there would be a double crossing...
-        let mut p_dc = F::zero();
-        let mut l_dc: Option<usize> = None;
-        for (l, alloc) in allocations.iter().enumerate() {
-            if alloc.agent().income() > p_min {
-                if alloc.agent().utility(p_min, q1) > alloc.utility() {
-                    // We have a double crossing.
-                    let p_indif = indifferent_price(
-                        alloc.agent(),
-                        q1,
-                        alloc.utility(),
-                        p_min,
-                        alloc.agent().income(),
-                        epsilon,
-                        max_iter,
-                    ).ok_or(SBError::NoIndifference).unwrap();
-
-                    if l_dc.is_none() || p_indif > p_dc {
-                        p_dc = p_indif;
-                        l_dc = Some(l);
-                    }
-                }
-            }
-        }
-
-        if let Some(l_dc) = l_dc {
+        if let Some((l_dc, _)) = check_dc(&allocations, q1, p_min, epsilon, max_iter) {
             // Go back to the dc agent and try to go under, if we cant, allocate this agent above.
             // Return allocated items to the pool.
-            let sub_n = allocations.len() - l_dc + 1;
+            let sub_n = allocations.len() - l_dc;
             backtrack(agents, items, &mut allocations, sub_n);
             println!("switchleft: {}, {}", allocations.len(), sub_n);
             // Allocate over.
-            allocations = align_left(agents, items, allocations, sub_n, epsilon, max_iter, render_pipe.clone())?;
+            allocations = align_left(
+                agents,
+                items,
+                allocations,
+                sub_n + 1, // +1 ensures that we make progress and dont have infinite switching.
+                epsilon,
+                max_iter,
+                render_pipe.clone(),
+            )?;
 
             if let Some(last) = allocations.last() {
-                if let Some(next_item) = items.last() {
-                    q0 = next_item.quality();
-                    p0 = last.indifferent_price(q0, epsilon, max_iter).ok_or(SBError::NoIndifference).unwrap();
-                }
+                q0 = last.quality();
+                p0 = last.price();
             } else {
                 return Err(SBError::NoSupport);
             }
 
-            *render_pipe.lock().unwrap().deref_mut() = Some(allocations.iter().map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter)).collect());
+            *render_pipe.lock().unwrap().deref_mut() = Some(
+                allocations
+                    .iter()
+                    .map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter))
+                    .collect(),
+            );
 
             // Insert after - we know the agent must prefer this point. This should be done automatically by continuing.
         } else {
             // We have a valid allocation.
-            let alloc = Allocation::new(agents.remove(to_allocate.ok_or(SBError::NoCandidate)?), items.remove(0), p_min);
+            let alloc = Allocation::new(
+                agents.remove(to_allocate.ok_or(SBError::NoCandidate)?),
+                items.remove(0),
+                p_min,
+            );
             allocations.push(alloc);
 
             q0 = q1;
@@ -262,5 +300,13 @@ pub fn swichbranch<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
     render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
 ) -> SBResult<Vec<Allocation<F, A, I>>> {
     assert_eq!(agents.len(), items.len());
-    align_left(agents, items, Vec::new(), items.len(), epsilon, max_iter, render_pipe)
+    align_left(
+        agents,
+        items,
+        Vec::new(),
+        items.len(),
+        epsilon,
+        max_iter,
+        render_pipe,
+    )
 }
