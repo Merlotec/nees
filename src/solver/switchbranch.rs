@@ -1,4 +1,7 @@
 use core::alloc;
+use std::{ops::DerefMut, sync::{Arc, Mutex}};
+
+use crate::render::RenderAllocation;
 
 use super::{utility::indifferent_price, Agent, Allocation, Item};
 
@@ -33,6 +36,7 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
     mut n: usize,
     epsilon: F,
     max_iter: usize,
+    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>
 ) -> SBResult<Vec<Allocation<F, A, I>>> {
     assert_eq!(agents.len(), items.len());
     if items.is_empty() {
@@ -116,12 +120,12 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
 
             if let Some(l_dc) = l_dc {
                 // Go back to the dc agent and try to go under, if we cant, allocate this agent above.
-                let sub_n = allocations.len() - l_dc;
+                let sub_n = allocations.len() - l_dc + 1;
                 backtrack(agents, items, &mut allocations, sub_n);
-
+                println!("switchright: {}, {}", allocations.len(), sub_n);
                 // Allocate over.
                 allocations =
-                    align_right(agents, items, allocations, sub_n - 1, epsilon, max_iter)?;
+                    align_right(agents, items, allocations, sub_n, epsilon, max_iter, render_pipe.clone())?;
 
                 if let Some(last) = allocations.last() {
                     q0 = last.quality();
@@ -130,6 +134,7 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                     q0 = F::zero();
                     p0 = F::zero();
                 }
+                *render_pipe.lock().unwrap().deref_mut() = Some(allocations.iter().map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter)).collect());
             } else {
                 // We have a valid allocation.
                 let alloc = Allocation::new(agents.remove(to_allocate.ok_or(SBError::NoCandidate)?), items.remove(0), p0);
@@ -151,6 +156,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
     mut n: usize,
     epsilon: F,
     max_iter: usize,
+    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>
 ) -> SBResult<Vec<Allocation<F, A, I>>> {
     let mut q0: F = F::zero();
     let mut p0: F = F::zero();
@@ -217,11 +223,11 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
         if let Some(l_dc) = l_dc {
             // Go back to the dc agent and try to go under, if we cant, allocate this agent above.
             // Return allocated items to the pool.
-            let sub_n = allocations.len() - l_dc;
+            let sub_n = allocations.len() - l_dc + 1;
             backtrack(agents, items, &mut allocations, sub_n);
-
+            println!("switchleft: {}, {}", allocations.len(), sub_n);
             // Allocate over.
-            allocations = align_left(agents, items, allocations, sub_n - 1, epsilon, max_iter)?;
+            allocations = align_left(agents, items, allocations, sub_n, epsilon, max_iter, render_pipe.clone())?;
 
             if let Some(last) = allocations.last() {
                 if let Some(next_item) = items.last() {
@@ -232,8 +238,9 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
                 return Err(SBError::NoSupport);
             }
 
+            *render_pipe.lock().unwrap().deref_mut() = Some(allocations.iter().map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter)).collect());
+
             // Insert after - we know the agent must prefer this point. This should be done automatically by continuing.
-            continue;
         } else {
             // We have a valid allocation.
             let alloc = Allocation::new(agents.remove(to_allocate.ok_or(SBError::NoCandidate)?), items.remove(0), p_min);
@@ -252,7 +259,8 @@ pub fn swichbranch<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
     items: &mut Vec<I>,
     epsilon: F,
     max_iter: usize,
+    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
 ) -> SBResult<Vec<Allocation<F, A, I>>> {
     assert_eq!(agents.len(), items.len());
-    align_right(agents, items, Vec::new(), items.len(), epsilon, max_iter)
+    align_left(agents, items, Vec::new(), items.len(), epsilon, max_iter, render_pipe)
 }

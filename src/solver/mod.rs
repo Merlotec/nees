@@ -98,3 +98,43 @@ pub struct Solver<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
 
     allocations: Vec<Allocation<F, A, I>>,
 }
+
+
+pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(allocations: &[Allocation<F, A, I>], epsilon: F) -> bool {
+    let mut valid = true;
+
+    for (i, allocation_i) in allocations.iter().enumerate() {
+        let u = allocation_i.agent.utility(allocation_i.price, allocation_i.item.quality());
+        if (u - allocation_i.utility).abs() > epsilon {
+            println!("Agent {} has a utility mismatch!", i);
+            return false;
+        }
+
+        for (j, allocation_j) in allocations.iter().enumerate() {
+            if i != j {
+                if allocation_j.agent.item_id() == allocation_i.agent.item_id() {
+                    println!(
+                        "Agent {} has the same item_id as {}; item_id= {}",
+                        i,
+                        j,
+                        allocation_j.agent.item_id()
+                    );
+                    valid = false;
+                }
+
+                // Compute the utility agent i would get from allocation j
+                let u_alt = allocation_i.agent.utility(allocation_j.price, allocation_j.item.quality());
+                if u_alt > u + epsilon {
+                    println!(
+                        "Agent {} prefers allocation {}",
+                        i,
+                        j,
+                    );
+                    valid = false;
+                }
+            }
+        }
+    }
+
+    valid
+}
