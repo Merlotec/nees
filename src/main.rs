@@ -5,7 +5,7 @@ use std::{
 };
 
 use render::RenderAllocation;
-use solver::{switchbranch, verify_solution, Agent, Allocation};
+use solver::{switchbranch::{self, AgentHolder}, verify_solution, Agent, Allocation};
 use world::{House, Household};
 
 mod distribution;
@@ -33,10 +33,10 @@ fn main() {
 
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(5));
-        let allocations: Vec<Allocation<f64, Household<f64>, House<f64>>> =
+        let allocations: Vec<Allocation<f64, AgentHolder<Household<f64>>, House<f64>>> =
             switchbranch::swichbranch(
-                &mut world.households,
-                &mut world.houses,
+                world.households,
+                world.houses,
                 epsilon,
                 max_iter,
                 pipe.clone(),
