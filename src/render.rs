@@ -492,7 +492,7 @@ fn handle_hovering(
                 let text_style = TextStyle {
                     font: asset_server.load("fonts/Arial.ttf"),
                     font_size: 14.0,
-                    color: Color::BLACK,
+                    color: Color::Srgba(Srgba::GREEN),
                 };
 
                 // Spawn the text
@@ -500,7 +500,7 @@ fn handle_hovering(
                     text: Text::from_section(info_text, text_style.clone())
                         .with_justify(JustifyText::Left),
                     transform: Transform {
-                        translation: world_position + Vec3::new(10.0, -10.0, 1.0),
+                        translation: world_position + Vec3::new(10.0, -10.0, 99.0),
                         ..Default::default()
                     },
                     ..Default::default()

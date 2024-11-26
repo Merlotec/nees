@@ -1,7 +1,8 @@
 use core::alloc;
 use std::{
     ops::DerefMut,
-    sync::{Arc, Mutex}, time::Duration,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use crate::render::RenderAllocation;
@@ -46,11 +47,10 @@ pub fn backtrack<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
     n: usize,
     decrement_min: bool,
 ) {
-
     for _ in 0..n {
         let alloc = allocations.pop().unwrap();
         let (mut agent, item) = alloc.decompose();
-        //agent.min_alloc = 0;//if agent.min_alloc == 0 { 0 } else { agent.min_alloc - 1 };
+        agent.min_alloc = 0; //if agent.min_alloc == 0 { 0 } else { agent.min_alloc - 1 };
         agents.push(agent);
         items.insert(0, item); // Maintain order of items - very important.
     }
@@ -64,20 +64,23 @@ pub fn backtrack<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
     }
 }
 
-pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(allocations: &[Allocation<F, A, I>], q1: F, p_min: F, epsilon: F, max_iter: usize) -> Option<(usize, F)> {
+pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
+    allocations: &[Allocation<F, A, I>],
+    q1: F,
+    p_min: F,
+    epsilon: F,
+    max_iter: usize,
+) -> Option<(usize, F)> {
     let mut p_dc = F::zero();
     let mut l_dc: Option<usize> = None;
     for (l, alloc) in allocations.iter().enumerate() {
         if alloc.agent().income() > p_min + epsilon {
             if alloc.agent().utility(p_min, q1) > alloc.utility() + epsilon {
                 // We have a double crossing.
-                let p_indif = alloc.indifferent_price(
-                    q1,
-                    epsilon,
-                    max_iter,
-                )
-                .ok_or(SBError::NoIndifference)
-                .unwrap();
+                let p_indif = alloc
+                    .indifferent_price(q1, epsilon, max_iter)
+                    .ok_or(SBError::NoIndifference)
+                    .unwrap();
 
                 if l_dc.is_none() || p_indif > p_dc {
                     p_dc = p_indif;
@@ -111,16 +114,18 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
         (items.first().unwrap().quality(), F::zero())
     } else {
         let q = items.first().unwrap().quality();
+        let prev = allocations.last().unwrap();
+        let p = prev.indifferent_price(q, epsilon, max_iter)
+            .ok_or(SBError::NoIndifference)
+            .unwrap();
+        println!("prev: id={}, q0={}, p0={}, p_last={}, q_last={}", prev.agent().agent_id(), q.to_f32().unwrap(), p.to_f32().unwrap(), prev.price().to_f32().unwrap(), prev.quality().to_f32().unwrap());
         (
             q,
-            allocations
-                .last()
-                .unwrap()
-                .indifferent_price(q, epsilon, max_iter)
-                .ok_or(SBError::NoIndifference)
-                .unwrap(),
+            p
         )
     };
+
+
 
     while !items.is_empty() {
         if n == 0 {
@@ -129,8 +134,15 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
         // Find the steepest agent.
         let mut to_allocate: Option<usize> = None;
         if items.len() == 1 {
+            let agent = agents.remove(0);
+            println!(
+                "addleftlast: a_id={}, i={}",
+                agent.agent_id(),
+                allocations.len()
+            );
+
             // we are on last item so we just allocate last agent.
-            let alloc = Allocation::new(agents.remove(0), items.remove(0), p0);
+            let alloc = Allocation::new(agent, items.remove(0), p0);
             allocations.push(alloc);
         } else {
             let q1 = items[1].quality();
@@ -173,7 +185,9 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                 // if the next allocation will be valid, and since right alignment means that allocations are done using p0, q0, without checking
                 // validity, we need to check this now.
                 println!("tickleft");
-                while let Some((l_dc, _)) = check_dc(&allocations, q_next, p_next, epsilon, max_iter) {
+                while let Some((l_dc, _)) =
+                    check_dc(&allocations, q_next, p_next, epsilon, max_iter)
+                {
                     if dc {
                         println!("inner");
                     }
@@ -191,7 +205,12 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                     let dc_id = allocations[l_dc].agent().agent_id();
                     let sub_n = allocations.len() - l_dc - 1;
                     backtrack(agents, items, &mut allocations, sub_n, false);
-                    println!("switchright: al={}, id={}, dc_id={}", allocations.len(), a_id, dc_id);
+                    println!(
+                        "switchright: al={}, id={}, dc_id={}",
+                        allocations.len(),
+                        a_id,
+                        dc_id
+                    );
                     // Allocate over.
                     allocations = align_right(
                         agents,
@@ -214,7 +233,6 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                                 .indifferent_price(q_next, epsilon, max_iter)
                                 .ok_or(SBError::NoIndifference)
                                 .unwrap();
-
                         }
                     } else {
                         q_next = F::zero();
@@ -226,23 +244,35 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                         *render_pipe.lock().unwrap().deref_mut() = Some(
                             allocations
                                 .iter()
-                                .map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter))
+                                .map(|x| {
+                                    RenderAllocation::from_allocation(
+                                        &x,
+                                        F::one(),
+                                        epsilon,
+                                        max_iter,
+                                    )
+                                })
                                 .collect(),
                         );
 
-                        std::thread::sleep(Duration::from_millis(300));
+                        //std::thread::sleep(Duration::from_millis(300));
                     }
                 }
 
                 if !dc {
-                    println!("addleft: a_id={}, i={}", agents[a].agent_id(), allocations.len());
+                    let agent = agents.remove(a);
+                    let item = items.remove(0);
+                    println!(
+                        "addleft: a_id={}, i={}, q={} ({}), p={}",
+                        agent.agent_id(),
+                        allocations.len(),
+                        q0.to_f32().unwrap(),
+                        item.quality().to_f32().unwrap(),
+                        p0.to_f32().unwrap()
+                    );
 
                     // We have a valid allocation.
-                    let alloc = Allocation::new(
-                        agents.remove(a),
-                        items.remove(0),
-                        p0,
-                    );
+                    let alloc = Allocation::new(agent, item, p0);
                     allocations.push(alloc);
                     n -= 1;
 
@@ -250,11 +280,18 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                         *render_pipe.lock().unwrap().deref_mut() = Some(
                             allocations
                                 .iter()
-                                .map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter))
+                                .map(|x| {
+                                    RenderAllocation::from_allocation(
+                                        &x,
+                                        F::one(),
+                                        epsilon,
+                                        max_iter,
+                                    )
+                                })
                                 .collect(),
                         );
 
-                        std::thread::sleep(Duration::from_millis(300));
+                        //std::thread::sleep(Duration::from_millis(300));
                     }
                 }
                 q0 = q_next;
@@ -291,7 +328,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
         if n == 0 {
             return Ok(allocations);
         }
-        
+
         // Find the steepest agent.
         let mut to_allocate: Option<usize> = None;
 
@@ -331,19 +368,26 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
                 // Return allocated items to the pool.
                 let dc_id = allocations[l_dc].agent().agent_id();
                 let sub_n = allocations.len() - l_dc;
-                let min_alloc = allocations.len();
+                let min_alloc = l_dc + 1;
                 backtrack(agents, items, &mut allocations, sub_n - 1, false);
                 let (mut dc_agent, dc_item) = allocations.pop().unwrap().decompose(); // Backtracks to remove the final dc agent.
                 assert_eq!(dc_id, dc_agent.agent_id());
                 items.insert(0, dc_item);
                 dc_agent.min_alloc = min_alloc.max(dc_agent.min_alloc + 1);
-                println!("switchleft: al={}, id={} -> min_alloc={}, dc_id={} -> min_alloc={}", allocations.len(), a_id, agents[a].min_alloc, dc_id, dc_agent.min_alloc);
+                println!(
+                    "switchleft: al={}, id={} -> min_alloc={}, dc_id={} -> min_alloc={}",
+                    allocations.len(),
+                    a_id,
+                    agents[a].min_alloc,
+                    dc_id,
+                    dc_agent.min_alloc
+                );
                 agents.push(dc_agent);
 
                 // As we are shifting all subsequent agents down, we need to also reset their min_alloc, else they may be prevented from moving down properly.
-                if agents[a].min_alloc > 0 {
-                    agents[a].min_alloc -= 1;
-                }
+                // if agents[a].min_alloc > 0 {
+                //     agents[a].min_alloc -= 1;
+                // }
 
                 // Allocate over.
                 allocations = align_left(
@@ -369,13 +413,13 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
 
                 // Insert after - we know the agent must prefer this point. This should be done automatically by continuing.
             } else {
-                println!("addright: a_id={}, i={}", agents[a].agent_id(), allocations.len());
-                // We have a valid allocation.
-                let alloc = Allocation::new(
-                    agents.remove(a),
-                    items.remove(0),
-                    p_min,
+                println!(
+                    "addright: a_id={}, i={}",
+                    agents[a].agent_id(),
+                    allocations.len()
                 );
+                // We have a valid allocation.
+                let alloc = Allocation::new(agents.remove(a), items.remove(0), p_min);
                 allocations.push(alloc);
 
                 n -= 1;
@@ -389,7 +433,6 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
         }
     }
 
-
     if (allocations.len() > 1) {
         *render_pipe.lock().unwrap().deref_mut() = Some(
             allocations
@@ -398,7 +441,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
                 .collect(),
         );
 
-        std::thread::sleep(Duration::from_millis(300));
+        //std::thread::sleep(Duration::from_millis(300));
     }
 
     Ok(allocations)
@@ -413,7 +456,13 @@ pub fn swichbranch<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
 ) -> SBResult<Vec<Allocation<F, AgentHolder<A>, I>>> {
     assert_eq!(agents.len(), items.len());
 
-    let mut agents: Vec<AgentHolder<A>> = agents.into_iter().map(|x| AgentHolder { agent: x, min_alloc: 0 }).collect();
+    let mut agents: Vec<AgentHolder<A>> = agents
+        .into_iter()
+        .map(|x| AgentHolder {
+            agent: x,
+            min_alloc: 0,
+        })
+        .collect();
 
     let n = agents.len();
 

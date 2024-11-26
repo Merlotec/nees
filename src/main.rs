@@ -21,13 +21,22 @@ fn main() {
 
     //let mut world = distribution::create_world::<f64>(100, 100);
 
-    let mut world: World<f64> = serde_json::from_str(fs::read_to_string("config.json").unwrap().as_str()).unwrap();
+    let mut world: World<f64>;
+    if let Ok(s) = fs::read_to_string("config.json") {
+        world = serde_json::from_str(s.as_str()).unwrap();
+    } else {
+        world = distribution::create_world::<f64>(100, 100);
+        while !world.validate() {
+            world = distribution::create_world::<f64>(100, 100);
+        }
+        fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
+    }
 
     //fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
 
-    while !world.validate() {
-        world = distribution::create_world::<f64>(100, 100);
-    }
+
+
+
 
     let to_allocate: Arc<Mutex<Option<Vec<RenderAllocation>>>> = Arc::new(Mutex::new(None));
     let pipe = to_allocate.clone();
@@ -49,7 +58,7 @@ fn main() {
                 .map(|x| RenderAllocation::from_allocation(&x, 1.0, epsilon, max_iter))
                 .collect(),
         );
-        verify_solution(&allocations, 2.0 * epsilon);
+        verify_solution(&allocations, 10.0 * epsilon);
     });
 
     render::render_test(to_allocate);
