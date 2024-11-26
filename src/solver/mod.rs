@@ -6,7 +6,7 @@ pub mod switchbranch;
 pub trait Agent {
     type FloatType: num::Float;
 
-    fn item_id(&self) -> usize;
+    fn agent_id(&self) -> usize;
     fn income(&self) -> Self::FloatType;
     fn utility(&self, price: Self::FloatType, quality: Self::FloatType) -> Self::FloatType;
 }
@@ -112,12 +112,12 @@ pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType
 
         for (j, allocation_j) in allocations.iter().enumerate() {
             if i != j {
-                if allocation_j.agent.item_id() == allocation_i.agent.item_id() {
+                if allocation_j.agent.agent_id() == allocation_i.agent.agent_id() {
                     println!(
                         "Agent {} has the same item_id as {}; item_id= {}",
                         i,
                         j,
-                        allocation_j.agent.item_id()
+                        allocation_j.agent.agent_id()
                     );
                     valid = false;
                 }

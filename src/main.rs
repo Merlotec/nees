@@ -1,12 +1,9 @@
-use std::{
-    ops::DerefMut,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{fs, ops::DerefMut, sync::{Arc, Mutex}, time::Duration};
 
 use render::RenderAllocation;
 use solver::{switchbranch::{self, AgentHolder}, verify_solution, Agent, Allocation};
 use world::{House, Household};
+use crate::world::World;
 
 mod distribution;
 mod render;
@@ -22,7 +19,11 @@ fn main() {
     let epsilon = 1e-5;
     let max_iter = 400;
 
-    let mut world = distribution::create_world::<f64>(100, 100);
+    //let mut world = distribution::create_world::<f64>(100, 100);
+
+    let mut world: World<f64> = serde_json::from_str(fs::read_to_string("config.json").unwrap().as_str()).unwrap();
+
+    //fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
 
     while !world.validate() {
         world = distribution::create_world::<f64>(100, 100);
@@ -48,7 +49,7 @@ fn main() {
                 .map(|x| RenderAllocation::from_allocation(&x, 1.0, epsilon, max_iter))
                 .collect(),
         );
-        verify_solution(&allocations, 1e-5);
+        verify_solution(&allocations, 2.0 * epsilon);
     });
 
     render::render_test(to_allocate);

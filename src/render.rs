@@ -27,6 +27,7 @@ pub struct RenderAllocation {
     quality: f32,
     price: f32,
     utility: f32,
+    agent_id: usize,
 }
 
 impl RenderAllocation {
@@ -40,6 +41,7 @@ impl RenderAllocation {
             quality: allocation.quality().to_f32().unwrap(),
             price: allocation.price().to_f32().unwrap(),
             utility: allocation.utility().to_f32().unwrap(),
+            agent_id: allocation.agent().agent_id(),
         }
     }
 }
@@ -478,8 +480,9 @@ fn handle_hovering(
                 let allocation = &allocations[hovered_idx];
 
                 let info_text = format!(
-                    "n = {}\np = {:.2}\nq = {:.2}\nu = {:.2}",
+                    "n = {}\nid={}\np = {:.2}\nq = {:.2}\nu = {:.2}",
                     hovered_idx,
+                    allocation.agent_id,
                     allocation.price,
                     allocation.quality(),
                     allocation.utility,

@@ -6,11 +6,11 @@ use std::f64;
 use std::fmt;
 
 use num::one;
-
+use serde::{Deserialize, Serialize};
 use crate::solver::Agent;
 use crate::solver::Item;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Household<F: num::Float> {
     pub id: usize,
     pub income: F,
@@ -43,7 +43,7 @@ impl<F: num::Float> Household<F> where F: fmt::Display {
 impl<F: num::Float> Agent for Household<F> {
     type FloatType = F;
     /// Returns the item ID.
-    fn item_id(&self) -> usize {
+    fn agent_id(&self) -> usize {
         self.id
     }
 
@@ -61,7 +61,7 @@ impl<F: num::Float> Agent for Household<F> {
 
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct School<F: num::Float> {
     pub capacity: isize, // Capacity of the school.
     pub x: F,
@@ -73,7 +73,7 @@ pub struct School<F: num::Float> {
     pub num_pupils: i32, // Will be different from size if school is not full.
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct House<F: num::Float> {
     pub x: F,
     pub y: F,
@@ -116,6 +116,7 @@ impl<F: num::Float> Item for House<F> {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct World<F: num::Float> {
     pub households: Vec<Household<F>>,
     pub schools: Vec<School<F>>,
