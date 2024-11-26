@@ -112,6 +112,11 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
         )
     };
 
+    // Check if this first allocation is in fact valid:
+    if let Some(dc) = check_dc(&allocations, q0, p0, epsilon, max_iter) {
+        
+    }
+
     while !items.is_empty() {
         if n == 0 {
             return Ok(allocations);
@@ -316,7 +321,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
 
             dc_agent.min_alloc = allocations.len();
             agents.push(dc_agent);
-
+            // TODO: next position may be invalid!!! because we have cut the left shift early... 
             allocations = align_left(
                 agents,
                 items,
