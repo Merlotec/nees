@@ -100,7 +100,7 @@ pub struct Solver<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
 }
 
 
-pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(allocations: &[Allocation<F, A, I>], epsilon: F) -> bool {
+pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(allocations: &[Allocation<F, A, I>], epsilon: F, max_iter: usize) -> bool {
     let mut valid = true;
 
     for (i, allocation_i) in allocations.iter().enumerate() {
@@ -123,12 +123,15 @@ pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType
                 }
 
                 // Compute the utility agent i would get from allocation j
-                let u_alt = allocation_i.agent.utility(allocation_j.price, allocation_j.item.quality());
+                let u_alt = allocation_i.agent.utility(allocation_j.price, allocation_j.quality());
                 if u_alt > u + epsilon {
+                    let p_alt = allocation_i.indifferent_price(allocation_j.quality(), epsilon, max_iter).unwrap();
                     println!(
-                        "Agent {} prefers allocation {}",
+                        "Agent {} prefers allocation {}, (delta_u = {}, delta_p = {})",
                         i,
                         j,
+                        (u_alt - u).to_f32().unwrap(),
+                        (p_alt - allocation_j.price()).to_f32().unwrap(),
                     );
                     valid = false;
                 }

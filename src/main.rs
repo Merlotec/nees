@@ -58,7 +58,11 @@ fn main() {
                 .map(|x| RenderAllocation::from_allocation(&x, 1.0, epsilon, max_iter))
                 .collect(),
         );
-        verify_solution(&allocations, epsilon);
+        if verify_solution(&allocations, epsilon, max_iter) {
+            println!("VERIFICATION SUCCESSFUL");
+        } else {
+            println!("VERIFICATION FAILED");
+        }
     });
 
     render::render_test(to_allocate);
