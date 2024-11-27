@@ -88,7 +88,7 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
         } else {
             (F::zero(), self.price)
         };
-        indifferent_price(self.agent(), self.quality(), self.utility, x_min, x_max, epsilon, max_iter)
+        indifferent_price(self.agent(), quality, self.utility, x_min, x_max, epsilon, max_iter)
     }
 }
 

@@ -70,10 +70,15 @@ pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     p_min: F,
     epsilon: F,
     max_iter: usize,
+    check_last: bool,
 ) -> Option<(usize, F)> {
     let mut p_dc = F::zero();
     let mut l_dc: Option<usize> = None;
+    let len = allocations.len();
     for (l, alloc) in allocations.iter().enumerate() {
+        // if l + 1 == len && !check_last {
+        //     break;
+        // }
         if alloc.agent().income() > p_min + epsilon {
             if alloc.agent().utility(p_min, q1) > alloc.utility() + epsilon {
                 // We have a double crossing.
@@ -181,12 +186,14 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                 let mut q_next = q1;
                 let mut p_next = p_min;
 
+                println!("leftqp: q={}, p={}, a={}", q_next.to_f32().unwrap(), p_next.to_f32().unwrap(), a_id);
+
                 // This could cause a further double crossing - we only know that the allocation of the previous agent is valid, but we don't know
                 // if the next allocation will be valid, and since right alignment means that allocations are done using p0, q0, without checking
                 // validity, we need to check this now.
                 println!("tickleft");
                 while let Some((l_dc, _)) =
-                    check_dc(&allocations, q_next, p_next, epsilon, max_iter)
+                    check_dc(&allocations, q_next, p_next, epsilon, max_iter, !dc)
                 {
                     if dc {
                         println!("inner");
@@ -203,10 +210,13 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
                     // One agent constant in the loop... agent before inner.
                     // NOT ALWAYS
                     let dc_id = allocations[l_dc].agent().agent_id();
+
+                    // TODO: does this depend on whether the agent has been allocated right or left last time.
                     let sub_n = allocations.len() - l_dc - 1;
                     backtrack(agents, items, &mut allocations, sub_n, false);
                     println!(
-                        "switchright: al={}, id={}, dc_id={}",
+                        "switchright ({}): al={}, id={}, dc_id={}",
+                        sub_n,
                         allocations.len(),
                         a_id,
                         dc_id
@@ -363,7 +373,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
             let a_id = agents[a].agent_id();
             println!("tickright");
             // Check if there would be a double crossing...
-            if let Some((l_dc, _)) = check_dc(&allocations, q1, p_min, epsilon, max_iter) {
+            if let Some((l_dc, _)) = check_dc(&allocations, q1, p_min, epsilon, max_iter, false) {
                 // Go back to the dc agent and try to go under, if we cant, allocate this agent above.
                 // Return allocated items to the pool.
                 let dc_id = allocations[l_dc].agent().agent_id();
@@ -375,7 +385,8 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
                 items.insert(0, dc_item);
                 dc_agent.min_alloc = min_alloc.max(dc_agent.min_alloc + 1);
                 println!(
-                    "switchleft: al={}, id={} -> min_alloc={}, dc_id={} -> min_alloc={}",
+                    "switchleft({}): al={}, id={} -> min_alloc={}, dc_id={} -> min_alloc={}",
+                    sub_n,
                     allocations.len(),
                     a_id,
                     agents[a].min_alloc,

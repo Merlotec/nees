@@ -58,7 +58,7 @@ fn main() {
                 .map(|x| RenderAllocation::from_allocation(&x, 1.0, epsilon, max_iter))
                 .collect(),
         );
-        verify_solution(&allocations, 10.0 * epsilon);
+        verify_solution(&allocations, epsilon);
     });
 
     render::render_test(to_allocate);
