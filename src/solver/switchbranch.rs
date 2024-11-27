@@ -378,7 +378,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
                 // Return allocated items to the pool.
                 let dc_id = allocations[l_dc].agent().agent_id();
                 let sub_n = allocations.len() - l_dc;
-                let min_alloc = l_dc + 1;
+                let min_alloc = allocations.len();//l_dc + 1;
                 backtrack(agents, items, &mut allocations, sub_n - 1, false);
                 let (mut dc_agent, dc_item) = allocations.pop().unwrap().decompose(); // Backtracks to remove the final dc agent.
                 assert_eq!(dc_id, dc_agent.agent_id());
