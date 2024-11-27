@@ -7,14 +7,17 @@ use bevy::color::palettes::css::WHITE;
 use bevy::math::VectorSpace;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
-use bevy_polyline::prelude::{Polyline, PolylineBundle, PolylineMaterial};
-use bevy_polyline::PolylinePlugin;
 use bevy_prototype_lyon::prelude::*;
 use std::f32::consts::PI;
 use std::ops::{Deref, DerefMut};
 use std::sync::{Arc, Mutex};
 use bevy::input::mouse::MouseWheel;
-use bevy::sprite::{MaterialMesh2dBundle, Mesh2d, Mesh2dHandle};
+use bevy::render::mesh::{MeshVertexAttribute, PrimitiveTopology};
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::render_resource::VertexFormat;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::{RenderCreation, WgpuFeatures, WgpuSettings};
+use bevy::sprite::{MaterialMesh2dBundle, Mesh2d, Mesh2dHandle, Wireframe2d, Wireframe2dColor, Wireframe2dPlugin};
 use crate::solver::{Agent, Allocation, Item};
 use crate::solver::utility::generate_indifference_curve;
 // Data structures
@@ -68,6 +71,8 @@ struct ViewBounds {
 
     sf_x: f32,
     sf_y: f32,
+
+    zoom: f32,
 }
 
 // Components
@@ -230,14 +235,26 @@ fn handle_input(
     mouse_button_input: Res<ButtonInput<MouseButton>>,
     mut scroll_events: EventReader<MouseWheel>,
     mut cursor_moved_events: EventReader<CursorMoved>,
+    mut view_bounds: ResMut<ViewBounds>,
     mut query: Query<&mut Transform, With<Camera>>,
+    mut transform_query: Query<&mut Transform, (Without<Camera>, Without<IndifferenceCurve>)>,
+    mut curve_query: Query<&mut Stroke, With<IndifferenceCurve>>,
 ) {
     let mut camera_transform = query.single_mut();
 
     // Handle zooming
     for event in scroll_events.read() {
         let zoom_factor = 1.0 - event.y * 0.1;
+        view_bounds.zoom *= zoom_factor;
         camera_transform.scale *= Vec3::new(zoom_factor, zoom_factor, 1.0);
+        // Apply zoom factor to width and size of circles.
+        for mut stroke in curve_query.iter_mut() {
+            stroke.options.line_width *= zoom_factor;
+        }
+
+        for mut transform in transform_query.iter_mut() {
+            transform.scale *= Vec3::new(zoom_factor, zoom_factor, 1.0);
+        }
     }
 
     if mouse_button_input.pressed(MouseButton::Left) {
@@ -263,8 +280,6 @@ fn draw_allocations(
     mut query: Query<Entity, With<AllocationEntity>>,
     mut curve_query: Query<Entity, With<IndifferenceCurve>>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut polyline_materials: ResMut<Assets<PolylineMaterial>>,
-    mut polylines: ResMut<Assets<Polyline>>,
     ) {
     // Only run when allocations have changed
     let allocations_res: &mut AllocationsResource = allocations_res.deref_mut();
@@ -307,7 +322,14 @@ fn draw_allocations(
                 let mut path_builder = PathBuilder::new();
     
                 let mut started = false;
-    
+
+                let mut mesh = Mesh::new(
+                    PrimitiveTopology::TriangleList,
+                    RenderAssetUsages::RENDER_WORLD,
+                );
+
+                let mut v_pos = vec![];
+
                 for (x, y) in allocation.ic.iter() {
                     let point = Vec2::new(*x * view_bounds.sf_x, *y * view_bounds.sf_y);
                     if !started {
@@ -316,11 +338,12 @@ fn draw_allocations(
                     } else {
                         path_builder.line_to(point);
                     }
+                    v_pos.push(Vec3::new(point.x, point.y, 0.0));
                 }
-
+                mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, v_pos);
                 //let z = -(i as f32) - 1.0;
                 //let vertices: Vec<Vec2> = allocation.ic.iter().map(|(x, y)| Vec2::new(*x * view_bounds.sf_x, *y * view_bounds.sf_y)).collect();
-    
+
                 let path = path_builder.build();
     
                 let color = if i == current_idx {
@@ -343,12 +366,19 @@ fn draw_allocations(
                         Stroke::new(color, 1.0),
                     ))
                     .insert(IndifferenceCurve { index: i });
-                // commands.spawn(MaterialMesh2dBundle {
-                //     mesh: meshes.add(BoxedPolyline2d::new(vertices)).into(),
-                //     material: materials.add(Color::BLACK),
-                //     transform: Transform::from_xyz(0.0, 0.0, 0.0),
-                //     ..default()
-                // });
+                // commands.spawn((
+                //     MaterialMesh2dBundle {
+                //         mesh: meshes.add(mesh).into(),
+                //         material: materials.add(Color::BLACK),
+                //         transform: Transform::from_xyz(0., 0., -(i as f32) - 1.0),
+                //         ..default()
+                //     },
+                //     Wireframe2d,
+                //     // This lets you configure the wireframe color of this entity.
+                //     // If not set, this will use the color in `WireframeConfig`
+                //     Wireframe2dColor { color: color.into() },
+                // ));
+
             }
     
             // Draw allocation circles
@@ -456,7 +486,7 @@ fn handle_hovering(
                 let distance = ((world_position.x - x).powi(2) + (world_position.y - y).powi(2)).sqrt();
                 //println!("Dist: {}, {}, {}, {}", x, y, world_position.x, world_position.y);
                 
-                if distance <= circle_radius {
+                if distance <= circle_radius * view_bounds.zoom {
                     hovered_idx = Some(allocation_entity.index);
 
                     fill.color = Color::Srgba(Srgba::new(1.0, 0.65, 0.01, 1.0));
@@ -499,8 +529,10 @@ fn handle_hovering(
                 commands.spawn(Text2dBundle {
                     text: Text::from_section(info_text, text_style.clone())
                         .with_justify(JustifyText::Left),
+
                     transform: Transform {
-                        translation: world_position + Vec3::new(10.0, -10.0, 99.0),
+                        translation: world_position,
+                        scale: Vec3::new(view_bounds.zoom, view_bounds.zoom, 1.0),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -532,6 +564,13 @@ pub fn render_test(to_allocate: Arc<Mutex<Option<Vec<RenderAllocation>>>>) {
                 ..default()
             }),
             ..default()
+        }).set(RenderPlugin {
+            render_creation: RenderCreation::Automatic(WgpuSettings {
+                // WARN this is a native only feature. It will not work with webgl or webgpu
+                features: WgpuFeatures::POLYGON_MODE_LINE,
+                ..default()
+            }),
+            ..default()
         }))
         .insert_resource(AllocationsResource {
             to_allocate,
@@ -539,9 +578,9 @@ pub fn render_test(to_allocate: Arc<Mutex<Option<Vec<RenderAllocation>>>>) {
             current_idx: 0,
         })
         .insert_resource(HoveredAllocation(None))
-        .insert_resource(ViewBounds::default())
+        .insert_resource(ViewBounds { zoom: 1.0, ..Default::default() })
         .add_plugins(ShapePlugin)
-        .add_plugins(PolylinePlugin)
+        .add_plugins(Wireframe2dPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, handle_input)
         .add_systems(Update, draw_allocations)
