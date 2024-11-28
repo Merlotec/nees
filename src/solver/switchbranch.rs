@@ -64,6 +64,69 @@ pub fn backtrack<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
     }
 }
 
+pub fn boundary_point<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
+    allocations: &[Allocation<F, AgentHolder<A>, I>],
+    quality: F,
+    epsilon: F,
+    max_iter: usize,
+) -> Option<(usize, F)> {
+    let mut p_max: F = num::zero();
+    let mut i_max: Option<usize> = None;
+    for (i, alloc) in allocations.iter().enumerate().rev() {
+        if i_max.is_none() {
+            p_max = alloc.indifferent_price(quality, epsilon, max_iter)?;
+            i_max = Some(i);
+        } else {
+            let u_other = alloc.agent().utility(p_max, quality);
+            if u_other > alloc.utility() {
+                p_max = alloc.indifferent_price(quality, epsilon, max_iter)?;
+                i_max = Some(i);
+            }
+        }
+    }
+
+    i_max.map(|i| {(i, p_max)})
+}
+
+
+pub fn steepest_alignment<F: num::Float, A: Agent<FloatType = F>>(
+    agents: &[AgentHolder<A>],
+    q0: F,
+    p0: F,
+    q1: F,
+    i: usize,
+    epsilon: F,
+    max_iter: usize,
+) -> SBResult<(usize, F)> {
+    let mut p_min = F::zero();
+    let mut to_allocate: Option<usize> = None;
+    for (a, agent) in agents.iter().enumerate() {
+        if agent.min_alloc > i {
+            continue; // Dont allocate an agent that has a min alloc set above this as its a dc agent and will cause loops.
+        }
+
+        if agent.income() <= p0 {
+            return Err(SBError::IncomeExceeded); // Should not happenn.
+        }
+        let p_indif = indifferent_price(
+            agent,
+            q1,
+            agent.utility(p0, q0),
+            p0,
+            agent.income(),
+            epsilon,
+            max_iter,
+        )
+            .ok_or(SBError::NoIndifference)
+            .unwrap();
+
+        if to_allocate.is_none() || p_indif < p_min {
+            p_min = p_indif;
+            to_allocate = Some(a);
+        }
+    }
+    to_allocate.map(|x| (x, p_min)).ok_or(SBError::NoCandidate)
+}
 pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     allocations: &[Allocation<F, A, I>],
     q1: F,
@@ -98,6 +161,33 @@ pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     l_dc.map(|x| (x, p_dc))
 }
 
+pub fn check_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
+    alloc: &Allocation<F, A, I>,
+    allocations: &[Allocation<F, A, I>],
+    epsilon: F,
+    max_iter: usize,
+    check_last: bool,
+) -> Option<(usize, F)> {
+    let mut u_max = F::zero();
+    let mut fav: Option<usize> = None;
+    let len = allocations.len();
+    for (l, other) in allocations.iter().enumerate() {
+        if alloc.agent().income() > other.price() + epsilon {
+            let u = alloc.agent().utility(other.price(), other.quality());
+            if u > alloc.utility() + epsilon {
+                // We have a double crossing.
+
+                if fav.is_none() || u > u_max {
+                    u_max = u;
+                    fav = Some(l)
+                }
+            }
+        }
+    }
+
+    fav.map(|x| (x, u_max))
+}
+
 pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     agents: &mut Vec<AgentHolder<A>>,
     items: &mut Vec<I>,
@@ -112,202 +202,96 @@ pub fn align_left<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>
         return Ok(allocations);
     }
 
-    let mut q0: F;
-    let mut p0: F;
-
-    let (mut q0, mut p0) = if allocations.is_empty() {
-        (items.first().unwrap().quality(), F::zero())
-    } else {
-        let q = items.first().unwrap().quality();
-        let prev = allocations.last().unwrap();
-        let p = prev.indifferent_price(q, epsilon, max_iter)
-            .ok_or(SBError::NoIndifference)
-            .unwrap();
-        println!("prev: id={}, q0={}, p0={}, p_last={}, q_last={}", prev.agent().agent_id(), q.to_f32().unwrap(), p.to_f32().unwrap(), prev.price().to_f32().unwrap(), prev.quality().to_f32().unwrap());
-        (
-            q,
-            p
-        )
-    };
-
-
-
     while !items.is_empty() {
         if n == 0 {
             return Ok(allocations);
         }
-        // Find the steepest agent.
-        let mut to_allocate: Option<usize> = None;
-        if items.len() == 1 {
-            let agent = agents.remove(0);
+
+        let q0: F = items.first().unwrap().quality();
+
+
+        let (b, p0): (Option<usize>, F) = if let Some((b, p0)) = boundary_point(&allocations, q0, epsilon, max_iter) {
+            (Some(b), p0)
+        } else {
+            (None, F::zero())
+        };
+
+        let new_alloc = if items.len() == 1 {
+            // Allocate last.
+            Allocation::new(agents.remove(0), items.remove(0), p0)
+        } else {
+            // p0, q0 is the left aligned valid allocation point.
+            let q1 = items[1].quality();
+
+            let (a, p1) = steepest_alignment(agents.as_slice(), q0, p0, q1, allocations.len(), epsilon, max_iter)?;
+
+
+
+            Allocation::new(agents.remove(a), items.remove(0), p0)
+        };
+
+        let a_id = new_alloc.agent().agent_id();
+
+        if let Some((_, _)) = check_favourite(&new_alloc, &allocations, epsilon, max_iter, false) {
+            // Since we were pushed back by the boundary agent b, this must be our double crossing agent.
+            let l_dc = b.unwrap(); // Must exist for a doublecross
+
+            let dc_id = allocations[l_dc].agent().agent_id();
+
+            let sub_n = allocations.len() - l_dc - 1;
+            // Deconstruct the new alloc - MUST HAPPEN BEFORE BACKTRACK.
+            let (new_agent, new_item) = new_alloc.decompose();
+            agents.push(new_agent);
+            items.insert(0, new_item);
+            // Now we backtrack to the dc agent.
+            backtrack(agents, items, &mut allocations, sub_n, false);
             println!(
-                "addleftlast: a_id={}, i={}",
-                agent.agent_id(),
-                allocations.len()
+                "switchright ({}): al={}, id={}, dc_id={}",
+                sub_n,
+                allocations.len(),
+                a_id,
+                dc_id
+            );
+            // Allocate over.
+            allocations = align_right(
+                agents,
+                items,
+                allocations,
+                sub_n + 1, // +1 ensures that we make progress and dont have infinite switching.
+                epsilon,
+                max_iter,
+                render_pipe.clone(),
+            )?;
+        } else {
+            println!(
+                "addleft: a_id={}, i={}, q={} ({}), p={}",
+                new_alloc.agent().agent_id(),
+                allocations.len(),
+                q0.to_f32().unwrap(),
+                new_alloc.item().quality().to_f32().unwrap(),
+                p0.to_f32().unwrap()
             );
 
-            // we are on last item so we just allocate last agent.
-            let alloc = Allocation::new(agent, items.remove(0), p0);
-            allocations.push(alloc);
-        } else {
-            let q1 = items[1].quality();
-            let mut p_min = F::zero();
-            for (a, agent) in agents.iter().enumerate() {
-                if agent.min_alloc > allocations.len() {
-                    continue; // Dont allocate an agent that has a min alloc set above this as its a dc agent and will cause loops.
-                }
+            // We have a valid allocation.
+            allocations.push(new_alloc);
+            n -= 1;
 
-                if agent.income() <= p0 {
-                    return Err(SBError::IncomeExceeded); // Should not happenn.
-                }
-                let p_indif = indifferent_price(
-                    agent,
-                    q1,
-                    agent.utility(p0, q0),
-                    p0,
-                    agent.income(),
-                    epsilon,
-                    max_iter,
-                )
-                .ok_or(SBError::NoIndifference)
-                .unwrap();
+            if allocations.len() > 1 {
+                *render_pipe.lock().unwrap().deref_mut() = Some(
+                    allocations
+                        .iter()
+                        .map(|x| {
+                            RenderAllocation::from_allocation(
+                                &x,
+                                F::one(),
+                                epsilon,
+                                max_iter,
+                            )
+                        })
+                        .collect(),
+                );
 
-                if to_allocate.is_none() || p_indif < p_min {
-                    p_min = p_indif;
-                    to_allocate = Some(a);
-                }
-            }
-            if let Some(a) = to_allocate {
-                let a_id = agents[a].agent_id();
-
-                // Check if there would be a double crossing...
-                let mut dc = false;
-
-                let mut q_next = q1;
-                let mut p_next = p_min;
-
-                println!("leftqp: q={}, p={}, a={}", q_next.to_f32().unwrap(), p_next.to_f32().unwrap(), a_id);
-
-                // This could cause a further double crossing - we only know that the allocation of the previous agent is valid, but we don't know
-                // if the next allocation will be valid, and since right alignment means that allocations are done using p0, q0, without checking
-                // validity, we need to check this now.
-                println!("tickleft");
-                while let Some((l_dc, _)) =
-                    check_dc(&allocations, q_next, p_next, epsilon, max_iter, !dc)
-                {
-                    if dc {
-                        println!("inner");
-                    }
-                    dc = true;
-                    if n == 0 {
-                        break;
-                    }
-                    // We do not want to remove the dc agent because we want to try to allocate under it.
-                    // If this does not work then it will be shifted above, but by the align_right function.
-
-                    // TODO: issue might be that we allocate the wrong agent earlier, then keep trying to deal with the double crossing, so we move it up but insert an even higher agent to the same position.
-                    // problem with having steeper agent 'stuck' in a higher position???
-                    // One agent constant in the loop... agent before inner.
-                    // NOT ALWAYS
-                    let dc_id = allocations[l_dc].agent().agent_id();
-
-                    // TODO: does this depend on whether the agent has been allocated right or left last time.
-                    let sub_n = allocations.len() - l_dc - 1;
-                    backtrack(agents, items, &mut allocations, sub_n, false);
-                    println!(
-                        "switchright ({}): al={}, id={}, dc_id={}",
-                        sub_n,
-                        allocations.len(),
-                        a_id,
-                        dc_id
-                    );
-                    // Allocate over.
-                    allocations = align_right(
-                        agents,
-                        items,
-                        allocations,
-                        sub_n + 1, // +1 ensures that we make progress and dont have infinite switching.
-                        epsilon,
-                        max_iter,
-                        render_pipe.clone(),
-                    )?;
-
-                    n -= 1;
-
-                    // We now have +1 agent allocated.
-                    // Check the new agent to see if its indeed valid for left allocaction.
-                    if let Some(last) = allocations.last() {
-                        if let Some(next_item) = items.first() {
-                            q_next = next_item.quality();
-                            p_next = last
-                                .indifferent_price(q_next, epsilon, max_iter)
-                                .ok_or(SBError::NoIndifference)
-                                .unwrap();
-                        }
-                    } else {
-                        q_next = F::zero();
-                        p_next = F::zero();
-                        // Checking dc should be vacuously true.
-                    }
-
-                    if (allocations.len() > 1) {
-                        *render_pipe.lock().unwrap().deref_mut() = Some(
-                            allocations
-                                .iter()
-                                .map(|x| {
-                                    RenderAllocation::from_allocation(
-                                        &x,
-                                        F::one(),
-                                        epsilon,
-                                        max_iter,
-                                    )
-                                })
-                                .collect(),
-                        );
-
-                        //std::thread::sleep(Duration::from_millis(300));
-                    }
-                }
-
-                if !dc {
-                    let agent = agents.remove(a);
-                    let item = items.remove(0);
-                    println!(
-                        "addleft: a_id={}, i={}, q={} ({}), p={}",
-                        agent.agent_id(),
-                        allocations.len(),
-                        q0.to_f32().unwrap(),
-                        item.quality().to_f32().unwrap(),
-                        p0.to_f32().unwrap()
-                    );
-
-                    // We have a valid allocation.
-                    let alloc = Allocation::new(agent, item, p0);
-                    allocations.push(alloc);
-                    n -= 1;
-
-                    if (allocations.len() > 1) {
-                        *render_pipe.lock().unwrap().deref_mut() = Some(
-                            allocations
-                                .iter()
-                                .map(|x| {
-                                    RenderAllocation::from_allocation(
-                                        &x,
-                                        F::one(),
-                                        epsilon,
-                                        max_iter,
-                                    )
-                                })
-                                .collect(),
-                        );
-
-                        //std::thread::sleep(Duration::from_millis(300));
-                    }
-                }
-                q0 = q_next;
-                p0 = p_next;
-            } else {
-                return Err(SBError::NoCandidate);
+                //std::thread::sleep(Duration::from_millis(300));
             }
         }
     }
@@ -339,108 +323,80 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
             return Ok(allocations);
         }
 
-        // Find the steepest agent.
-        let mut to_allocate: Option<usize> = None;
+        let mut q0: F = F::zero();
+        let mut p0: F = F::zero();
 
+        if let Some(last) = allocations.last() {
+            q0 = last.quality();
+            p0 = last.price();
+        }
         let q1 = items.first().unwrap().quality();
-        let mut p_min = F::zero();
-        for (a, agent) in agents.iter().enumerate() {
-            if agent.min_alloc > allocations.len() {
-                continue; // Dont allocate an agent that has a min alloc set above this as its a dc agent and will cause loops.
-            }
+        // Find the steepest agent.
+        let (a, p1) = steepest_alignment(agents.as_slice(), q0, p0, q1, allocations.len(), epsilon, max_iter)?;
 
-            if agent.income() <= p0 {
-                return Err(SBError::IncomeExceeded); // Should not happenn.
-            }
-            let p_indif = indifferent_price(
-                agent,
-                q1,
-                agent.utility(p0, q0),
-                p0,
-                agent.income(),
+        let a_id = agents[a].agent_id();
+        println!("tickright");
+        // Check if there would be a double crossing...
+        if let Some((l_dc, _)) = check_dc(&allocations, q1, p1, epsilon, max_iter, false) {
+            // Go back to the dc agent and try to go under, if we cant, allocate this agent above.
+            // Return allocated items to the pool.
+            let dc_id = allocations[l_dc].agent().agent_id();
+            let sub_n = allocations.len() - l_dc;
+            let min_alloc = allocations.len();//l_dc + 1;
+            backtrack(agents, items, &mut allocations, sub_n - 1, false);
+            let (mut dc_agent, dc_item) = allocations.pop().unwrap().decompose(); // Backtracks to remove the final dc agent.
+            assert_eq!(dc_id, dc_agent.agent_id());
+            items.insert(0, dc_item);
+            dc_agent.min_alloc = min_alloc.max(dc_agent.min_alloc + 1);
+            println!(
+                "switchleft({}): al={}, id={} -> min_alloc={}, dc_id={} -> min_alloc={}",
+                sub_n,
+                allocations.len(),
+                a_id,
+                agents[a].min_alloc,
+                dc_id,
+                dc_agent.min_alloc
+            );
+            agents.push(dc_agent);
+
+            // As we are shifting all subsequent agents down, we need to also reset their min_alloc, else they may be prevented from moving down properly.
+            // if agents[a].min_alloc > 0 {
+            //     agents[a].min_alloc -= 1;
+            // }
+
+            // Allocate over.
+            allocations = align_left(
+                agents,
+                items,
+                allocations,
+                sub_n + 1, // We don't add 1 because we have the 'withheld' agent to push up. This will add one after.
                 epsilon,
                 max_iter,
-            )
-            .ok_or(SBError::NoIndifference)
-            .expect(&format!("FAILED: {}, n= {}", allocations.len(), n));
+                render_pipe.clone(),
+            )?;
 
-            if to_allocate.is_none() || p_indif < p_min {
-                p_min = p_indif;
-                to_allocate = Some(a);
-            }
-        }
-        if let Some(a) = to_allocate {
-            let a_id = agents[a].agent_id();
-            println!("tickright");
-            // Check if there would be a double crossing...
-            if let Some((l_dc, _)) = check_dc(&allocations, q1, p_min, epsilon, max_iter, false) {
-                // Go back to the dc agent and try to go under, if we cant, allocate this agent above.
-                // Return allocated items to the pool.
-                let dc_id = allocations[l_dc].agent().agent_id();
-                let sub_n = allocations.len() - l_dc;
-                let min_alloc = allocations.len();//l_dc + 1;
-                backtrack(agents, items, &mut allocations, sub_n - 1, false);
-                let (mut dc_agent, dc_item) = allocations.pop().unwrap().decompose(); // Backtracks to remove the final dc agent.
-                assert_eq!(dc_id, dc_agent.agent_id());
-                items.insert(0, dc_item);
-                dc_agent.min_alloc = min_alloc.max(dc_agent.min_alloc + 1);
-                println!(
-                    "switchleft({}): al={}, id={} -> min_alloc={}, dc_id={} -> min_alloc={}",
-                    sub_n,
-                    allocations.len(),
-                    a_id,
-                    agents[a].min_alloc,
-                    dc_id,
-                    dc_agent.min_alloc
-                );
-                agents.push(dc_agent);
+            println!("after: {}", dc_id);
 
-                // As we are shifting all subsequent agents down, we need to also reset their min_alloc, else they may be prevented from moving down properly.
-                // if agents[a].min_alloc > 0 {
-                //     agents[a].min_alloc -= 1;
-                // }
+            n -= 1;
 
-                // Allocate over.
-                allocations = align_left(
-                    agents,
-                    items,
-                    allocations,
-                    sub_n + 1, // We don't add 1 because we have the 'withheld' agent to push up. This will add one after.
-                    epsilon,
-                    max_iter,
-                    render_pipe.clone(),
-                )?;
-
-                println!("after: {}", dc_id);
-
-                n -= 1;
-
-                if let Some(last) = allocations.last() {
-                    q0 = last.quality();
-                    p0 = last.price();
-                } else {
-                    return Err(SBError::NoSupport);
-                }
-
-                // Insert after - we know the agent must prefer this point. This should be done automatically by continuing.
+            if let Some(last) = allocations.last() {
+                q0 = last.quality();
+                p0 = last.price();
             } else {
-                println!(
-                    "addright: a_id={}, i={}",
-                    agents[a].agent_id(),
-                    allocations.len()
-                );
-                // We have a valid allocation.
-                let alloc = Allocation::new(agents.remove(a), items.remove(0), p_min);
-                allocations.push(alloc);
-
-                n -= 1;
-
-                q0 = q1;
-
-                p0 = p_min;
+                return Err(SBError::NoSupport);
             }
+
+            // Insert after - we know the agent must prefer this point. This should be done automatically by continuing.
         } else {
-            return Err(SBError::NoCandidate);
+            println!(
+                "addright: a_id={}, i={}",
+                agents[a].agent_id(),
+                allocations.len()
+            );
+            // We have a valid allocation.
+            let alloc = Allocation::new(agents.remove(a), items.remove(0), p1);
+            allocations.push(alloc);
+            n -= 1;
         }
     }
 
