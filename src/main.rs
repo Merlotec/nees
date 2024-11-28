@@ -16,18 +16,18 @@ fn main() {
     //     Allocation::new(Household::new(0, 120f64, 0.6f64, 0.5f64), House::new(0f64, 0f64, None, 0.8f64), 68f64)
     // ];
 
-    let epsilon = 1e-5;
+    let epsilon = 1e-6;
     let max_iter = 400;
-
+    let n = 200;
     //let mut world = distribution::create_world::<f64>(100, 100);
 
     let mut world: World<f64>;
     if let Ok(s) = fs::read_to_string("config.json") {
         world = serde_json::from_str(s.as_str()).unwrap();
     } else {
-        world = distribution::create_world::<f64>(100, 100);
+        world = distribution::create_world::<f64>(n, n);
         while !world.validate() {
-            world = distribution::create_world::<f64>(100, 100);
+            world = distribution::create_world::<f64>(n, n);
         }
         fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
     }

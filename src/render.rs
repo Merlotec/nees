@@ -358,7 +358,7 @@ fn draw_allocations(
                         ShapeBundle {
                             path,
                             spatial: SpatialBundle {
-                                transform: Transform::from_xyz(0., 0., -(i as f32) - 1.0),
+                                transform: Transform::from_xyz(0., 0., -(i as f32 / allocations.len() as f32) - 1.0),
                                 ..Default::default()
                             },
                             ..default()
@@ -407,7 +407,7 @@ fn draw_allocations(
                         ShapeBundle {
                             path: GeometryBuilder::new().add(&circle).build(),
                             spatial: SpatialBundle {
-                                transform: Transform::from_xyz(x, y, i as f32),
+                                transform: Transform::from_xyz(x, y, (i as f32) / allocations.len() as f32),
                                 ..Default::default()
                             },
                             ..default()
@@ -531,7 +531,7 @@ fn handle_hovering(
                         .with_justify(JustifyText::Left),
 
                     transform: Transform {
-                        translation: world_position,
+                        translation: world_position.with_z(100.0),
                         scale: Vec3::new(view_bounds.zoom, view_bounds.zoom, 1.0),
                         ..Default::default()
                     },
