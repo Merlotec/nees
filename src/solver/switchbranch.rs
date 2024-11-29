@@ -134,7 +134,7 @@ pub fn favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
 ) -> Option<(usize, F)> {
     let mut u_max = F::zero();
     let mut fav: Option<usize> = None;
-    for (l, other) in allocations.iter().enumerate() {
+    for (l, other) in allocations.iter().enumerate().rev() {
         if agent.income() > other.price() + epsilon {
             let u = agent.utility(other.price(), other.quality());
             if fav.is_none() || u > u_max + epsilon {
@@ -154,10 +154,10 @@ pub fn steepest_rightshift<F: num::Float, A: Agent<FloatType = F>, I: Item<Float
     i: usize,
     epsilon: F,
     max_iter: usize,
-) -> SBResult<(usize, F)> {
+) -> SBResult<(usize, F, usize)> {
     // Find the agent that this agent prefers to allocate relative to.
     let mut p_min = F::zero();
-    let mut to_allocate: Option<usize> = None;
+    let mut to_allocate: Option<(usize, usize)> = None;
     // We make the agent indifferent to the next favourite entity (so that we get the farthest out allocation).
     for (a, agent) in agents.iter().enumerate() {
         if agent.min_alloc > i {
@@ -179,10 +179,10 @@ pub fn steepest_rightshift<F: num::Float, A: Agent<FloatType = F>, I: Item<Float
 
         if to_allocate.is_none() || p < p_min {
             p_min = p;
-            to_allocate = Some(a);
+            to_allocate = Some((a, l));
         }
     }
-    to_allocate.map(|x| (x, p_min)).ok_or(SBError::NoCandidate)
+    to_allocate.map(|(a, l)| (a, p_min, l)).ok_or(SBError::NoCandidate)
 }
 
 pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
@@ -192,9 +192,8 @@ pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     epsilon: F,
     max_iter: usize,
     check_last: bool,
-) -> Option<(usize, F)> {
-    let mut p_dc = F::zero();
-    let mut l_dc: Option<usize> = None;
+) -> Vec<(usize, F)> {
+    let mut dcs: Vec<(usize, F)> = vec![];
     let len = allocations.len();
     for (l, alloc) in allocations.iter().enumerate() {
         // if l + 1 == len && !check_last {
@@ -207,16 +206,17 @@ pub fn check_dc<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                     .indifferent_price(q1, epsilon, max_iter)
                     .ok_or(SBError::NoIndifference)
                     .unwrap();
-
-                if l_dc.is_none() || p_indif > p_dc {
-                    p_dc = p_indif;
-                    l_dc = Some(l);
-                }
+                //
+                // if l_dc.is_none() || p_indif > p_dc {
+                //     p_dc = p_indif;
+                //     l_dc = Some(l);
+                // }
+                dcs.push((l, p_indif));
             }
         }
     }
 
-    l_dc.map(|x| (x, p_dc))
+    dcs
 }
 
 pub fn check_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
@@ -389,48 +389,71 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
         }
         let q1 = items.first().unwrap().quality();
         // Find the steepest agent.
-        let (a, p1) = steepest_rightshift(
-            agents.as_slice(),
-            &allocations,
-            q1,
-            allocations.len(),
-            epsilon,
-            max_iter,
-        )?;
-
-        // let (a, p1) = steepest_alignment(
+        // let (a, p1, b) = steepest_rightshift(
         //     agents.as_slice(),
-        //     q0,
-        //     p0,
+        //     &allocations,
         //     q1,
         //     allocations.len(),
         //     epsilon,
         //     max_iter,
         // )?;
 
+        let (a, p1) = steepest_alignment(
+            agents.as_slice(),
+            q0,
+            p0,
+            q1,
+            allocations.len(),
+            epsilon,
+            max_iter,
+        )?;
+
+        // if b != allocations.len() - 1 {
+        //     println!("NE: b={}, bz={}, p1={}, p1z={}", b, allocations.len() - 1, p1.to_f32().unwrap(), p1z.to_f32().unwrap());
+        // }
+        // //let p1 = p1z;
+
+        // println!("tickright (al={}, b={}, a_id={}, b_id= {})", allocations.len(), b, a_id, allocations[b].agent().agent_id());
+
+        let mut l_bt = None;
+        let mut dcs = check_dc(&allocations, q1, p1, epsilon, max_iter, true);
+        if dcs.len() > 1 {
+            for dc in &dcs {
+                println!("DOUBLEDC: {}", dc.0);
+            }
+        }
+        dcs.sort_by_key(|x| x.0);
+
+        if let Some((l_dc, _)) = dcs.last() {
+            l_bt = Some(*l_dc);
+        }
+        // if b + 1 < allocations.len() {
+        //     l_bt = Some(b);
+        // }
+
         let a_id = agents[a].agent_id();
-        println!("tickright");
         // Check if there would be a double crossing...
-        if let Some((l_dc, _)) = check_dc(&allocations, q1, p1, epsilon, max_iter, true) {
+        if let Some(l_bt) = l_bt {
             // Go back to the dc agent and try to go under, if we cant, allocate this agent above.
             // Return allocated items to the pool.
 
             // todo - maybe issues because dc occurs with immediately previous agent.
-            let dc_id = allocations[l_dc].agent().agent_id();
-            let sub_n = allocations.len() - l_dc;
-            let min_alloc = allocations.len(); //l_dc + 1;
+            let bt_id = allocations[l_bt].agent().agent_id();
+            let sub_n = allocations.len() - l_bt;
+            let min_alloc= allocations.len(); //l_dc + 1;
             backtrack(agents, items, &mut allocations, sub_n - 1, false);
             let (mut dc_agent, dc_item) = allocations.pop().unwrap().decompose(); // Backtracks to remove the final dc agent.
-            assert_eq!(dc_id, dc_agent.agent_id());
+            //assert_eq!(dc_id, dc_agent.agent_id());
             items.insert(0, dc_item);
             dc_agent.min_alloc = min_alloc.max(dc_agent.min_alloc + 1);
             println!(
-                "switchleft ({}): al={}, id={} -> min_alloc={}, dc_id={} -> min_alloc={}",
+                "switchleft ({}): al={}, id={} -> min_alloc={}, l_bt={}, bt_id={} -> min_alloc={}",
                 sub_n,
                 allocations.len(),
                 a_id,
                 agents[a].min_alloc,
-                dc_id,
+                l_bt,
+                bt_id,
                 dc_agent.min_alloc
             );
             agents.push(dc_agent);
@@ -451,7 +474,7 @@ pub fn align_right<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F
                 render_pipe.clone(),
             )?;
 
-            println!("after: {}", dc_id);
+            println!("after: {}", bt_id);
 
             n -= 1;
 

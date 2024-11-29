@@ -34,10 +34,6 @@ fn main() {
 
     //fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
 
-
-
-
-
     let to_allocate: Arc<Mutex<Option<Vec<RenderAllocation>>>> = Arc::new(Mutex::new(None));
     let pipe = to_allocate.clone();
 
