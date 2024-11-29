@@ -3,7 +3,7 @@ use crate::solver::switchbranch::AgentHolder;
 
 pub mod utility;
 pub mod switchbranch;
-mod fractal;
+pub mod fractal;
 
 pub trait Agent {
     type FloatType: num::Float;
@@ -64,7 +64,15 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
         return item;
     }
 
-    pub fn set_agent(&mut self, mut agent: A, price: F) -> A {
+    pub fn set_agent(&mut self, mut agent: A) -> A {
+        assert!(self.price < agent.income());
+
+        std::mem::swap(&mut self.agent, &mut agent);
+        self.utility = self.agent.utility(self.price, self.item.quality());
+        return agent;
+    }
+
+    pub fn set_agent_and_price(&mut self, mut agent: A, price: F) -> A {
         self.price = price;
         assert!(self.price < agent.income());
 
@@ -72,6 +80,7 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
         self.utility = self.agent.utility(self.price, self.item.quality());
         return agent;
     }
+
 
 
     fn set_price(&mut self, price: F) {
@@ -96,6 +105,10 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
             (F::zero(), self.price)
         };
         indifferent_price(self.agent(), quality, self.utility, x_min, x_max, epsilon, max_iter)
+    }
+
+    pub fn prefers(&self, other: &Self, epsilon: F) -> bool {
+        self.agent().utility(other.price(), other.quality()) > self.utility() + epsilon
     }
 }
 

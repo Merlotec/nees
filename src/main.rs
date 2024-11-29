@@ -3,6 +3,7 @@ use std::{fs, ops::DerefMut, sync::{Arc, Mutex}, time::Duration};
 use render::RenderAllocation;
 use solver::{switchbranch::{self, AgentHolder}, verify_solution, Agent, Allocation};
 use world::{House, Household};
+use crate::solver::fractal;
 use crate::world::World;
 
 mod distribution;
@@ -16,7 +17,7 @@ fn main() {
     //     Allocation::new(Household::new(0, 120f64, 0.6f64, 0.5f64), House::new(0f64, 0f64, None, 0.8f64), 68f64)
     // ];
 
-    let epsilon = 1e-6;
+    let epsilon = 1e-7;
     let max_iter = 400;
     let n = 200;
     //let mut world = distribution::create_world::<f64>(100, 100);
@@ -39,8 +40,8 @@ fn main() {
 
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(5));
-        let allocations: Vec<Allocation<f64, AgentHolder<Household<f64>>, House<f64>>> =
-            switchbranch::swichbranch(
+        let allocations: Vec<Allocation<f64, Household<f64>, House<f64>>> =
+            fractal::root(
                 world.households,
                 world.houses,
                 epsilon,

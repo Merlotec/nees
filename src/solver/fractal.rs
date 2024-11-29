@@ -1,19 +1,22 @@
 use super::*;
 use crate::render::RenderAllocation;
-use crate::solver::switchbranch::{boundary_point, steepest_alignment, SBError, SBResult};
 use crate::solver::{Agent, Allocation, Item};
-use std::alloc::alloc;
 use std::mem;
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
+use std::thread::sleep;
+use std::time::Duration;
+
 #[derive(Debug, Copy, Clone)]
 pub enum FractalError {
     NoIndifference,
     NoCandidate,
     IncomeExceeded,
-    NoSupport,
+    NoBoundary,
     NoDoublecross,
     InvalidInsertion,
     NoIntermediateAgent,
+    EmptyAllocation,
 }
 
 pub type FractalResult<T> = Result<T, FractalError>;
@@ -68,6 +71,34 @@ impl<A: Agent> Agent for AgentHolder<A> {
     }
 }
 
+pub fn displace<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
+    allocations: &mut [Allocation<F, AgentHolder<A>, I>],
+    i: usize,
+    to: usize,
+) {
+    if i > to {
+        let mut buffer = allocations[to].agent_mut().take();
+        let agent = allocations[i].agent_mut().take();
+        allocations[to].set_agent(agent);
+        for j in (to + 1..=i) {
+            let hold = allocations[j].agent_mut().take();
+            allocations[j].set_agent(buffer.take());
+            buffer = hold;
+        }
+
+        allocations[i].set_agent(buffer);
+    } else if to > i {
+        let mut buffer = allocations[to].agent_mut().take();
+        let agent = allocations[i].agent_mut().take();
+        allocations[to].set_agent(agent);
+        for j in (i..to).rev() {
+            let hold = allocations[j].agent_mut().take();
+            allocations[j].set_agent(buffer.take());
+            buffer = hold;
+        }
+    }
+}
+
 // q0 < q1
 pub fn next_agent_up<F: num::Float, A: Agent<FloatType = F>>(
     agents: &[A],
@@ -77,6 +108,7 @@ pub fn next_agent_up<F: num::Float, A: Agent<FloatType = F>>(
     epsilon: F,
     max_iter: usize,
 ) -> FractalResult<(usize, F)> {
+    assert!(q1 >= q0);
     let mut p_min = F::zero();
     let mut to_allocate: Option<usize> = None;
     for (a, agent) in agents.iter().enumerate() {
@@ -115,10 +147,12 @@ pub fn next_agent_down<F: num::Float, A: Agent<FloatType = F>>(
     epsilon: F,
     max_iter: usize,
 ) -> FractalResult<(usize, F)> {
+    assert!(q1 <= q0);
     let mut p_min = F::zero();
     let mut to_allocate: Option<usize> = None;
     for (a, agent) in agents.iter().enumerate() {
         if agent.income() <= p0 {
+            // TODO: what if??
             continue; // Should not happen.
         }
         let p_indif = indifferent_price(
@@ -197,6 +231,7 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     mut allocations: &mut [Allocation<F, AgentHolder<A>, I>],
     start: usize,
     end: usize,
+    ignore_lower_b: bool,
     epsilon: F,
     max_iter: usize,
     render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
@@ -211,39 +246,56 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         agents.push(ah.to_option().ok_or(FractalError::NoIntermediateAgent)?);
     }
 
-    let mut it = (end..=start).rev();
-    for l in &mut it {
+    let mut restore_to: Option<usize> = None;
+
+    for l in (end..=start).rev() {
         let q0 = allocations[l].quality();
         // Start with a.
         // Since we are first allocation, we can take the current price of the allocation as given.
         let (inner_b, p0) = if l == start {
-            (None, F::zero())
-        } else if let Some((inner_b, p)) =
-            envelope_boundary(&allocations, q0, epsilon, max_iter)
-        {
+            (None, allocations[l].price())
+        } else if let Some((inner_b, p)) = envelope_boundary(
+            if ignore_lower_b {
+                &allocations[start..allocations.len()]
+            } else {
+                &allocations
+            },
+            q0,
+            epsilon,
+            max_iter,
+        ) {
             // TODO: If the inner_b < a then it is an old agent, but we know that it does not interfere due to it previously being a valid allocation.
             // This is because for this to be a problem, the allocations must have been farther out in the previous valid state which is a contradiction.
 
             // TODO: Sln: if we hit this boundary, we can simply use old allocations after this as we know they are valid because our movement above.
             // will not disrupt these allocations.
-            (if inner_b >= start { Some(inner_b) } else { break; }, p)
+            (
+                if inner_b >= end {
+                    Some(inner_b)
+                } else {
+                    restore_to = Some(l);
+                    break;
+                },
+                p,
+            )
         } else {
-            return Err(FractalError::NoSupport);
+            return Err(FractalError::NoBoundary);
         };
-
 
         // May need to promote since we have pushed all the agents out (so may cross over the DC agent).
         // Find the steepest boundary.
         let agent = if l > end {
             let q1 = allocations[l - 1].quality();
-            let (a, p1) = next_agent_down(&agents, q0, p0, q1, epsilon, max_iter)
-                .ok_or(FractalError::NoCandidate)?;
-            let agent = agents.remove(a);
+            let (a, p1) = next_agent_down(&agents, q0, p0, q1, epsilon, max_iter)?;
+            agents.remove(a)
         } else {
             // Last agent to allocate, can allocate wherever.
             agents.pop().ok_or(FractalError::NoCandidate)?
         };
-        allocations[l].set_agent(AgentHolder::Agent(agent), p0);
+
+        println!("align_down: l={}, id={}, p={}", l, agent.agent_id(), p0.to_f64().unwrap());
+
+        allocations[l].set_agent_and_price(AgentHolder::Agent(agent), p0);
         // RECURSION!!!
         allocate(
             allocations,
@@ -257,10 +309,24 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
 
     // If there are still agents to allocate we allocate them up from the bottom (since this means that we break due to a recrossing).
     // Reverse again to go up from the s.
-    for l in it.rev() {
-        let p = allocations[l].price();
-        allocations[l].set_agent(AgentHolder::Agent(agents.remove(0)), p);
+    if let Some(restore_to) = restore_to {
+        assert!(!ignore_lower_b);
+        for l in end..=restore_to {
+            let agent = agents.remove(0);
+            println!("align_down, restore: l={}, id={}, p={}", l, agent.agent_id(), allocations[l].price().to_f64().unwrap());
+            allocations[l].set_agent(AgentHolder::Agent(agent));
+        }
     }
+
+    if allocations.len() > 69 {
+        if allocations[69].prefers(&allocations[68], epsilon) {
+            let pd = allocations[69].indifferent_price(allocations[68].quality(), epsilon, max_iter).unwrap();
+            println!("PREFERS !!!!!!: {:?}", pd.to_f64().unwrap());
+        }
+
+    }
+
+    Ok(())
 }
 
 /// Inclusive start and end.
@@ -268,6 +334,7 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     mut allocations: &mut [Allocation<F, AgentHolder<A>, I>],
     start: usize,
     end: usize,
+    ignore_upper_b: bool,
     epsilon: F,
     max_iter: usize,
     render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
@@ -279,37 +346,51 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         .collect();
     let mut agents = Vec::with_capacity(agent_holders.len());
     for ah in agent_holders {
-        agents.push(ah.to_option().ok_or(FractalError::NoIntermediateAgent));
+        agents.push(ah.to_option().ok_or(FractalError::NoIntermediateAgent)?);
     }
+    let mut restore_to: Option<usize> = None;
 
-    let mut it = end..=start;
-    for l in &mut it {
+    for l in start..=end {
         let q0 = allocations[l].quality();
         // Start with a.
         // Since we are first allocation, we can take the current price of the allocation as given.
         let (inner_b, p0) = if l == start {
-            (None, F::zero())
-        } else if let Some((inner_b, p)) =
-            envelope_boundary(&allocations, q0, epsilon, max_iter)
-        {
+            (None, allocations[l].price())
+        } else if let Some((inner_b, p)) = envelope_boundary(
+            if ignore_upper_b {
+                &allocations[0..end]
+            } else {
+                &allocations
+            },
+            q0,
+            epsilon,
+            max_iter,
+        ) {
             // TODO: If the inner_b < a then it is an old agent, but we know that it does not interfere due to it previously being a valid allocation.
             // This is because for this to be a problem, the allocations must have been farther out in the previous valid state which is a contradiction.
-            (if inner_b <= start { Some(inner_b) } else { break; }, p)
+            (
+                if inner_b <= start {
+                    Some(inner_b)
+                } else {
+                    restore_to = Some(l);
+                    break;
+                },
+                p,
+            )
         } else {
-            return Err(FractalError::NoSupport);
+            return Err(FractalError::NoBoundary);
         };
 
         // Find the steepest boundary.
         let agent = if l > end {
             let q1 = allocations[l - 1].quality();
-            let (a, p1) = next_agent_up(&agents, q0, p0, q1, epsilon, max_iter)
-                .ok_or(FractalError::NoCandidate)?;
-            let agent = agents.remove(a);
+            let (a, p1) = next_agent_up(&agents, q0, p0, q1, epsilon, max_iter)?;
+            agents.remove(a)
         } else {
             // Last agent to allocate, can allocate wherever.
             agents.pop().ok_or(FractalError::NoCandidate)?
         };
-        allocations[l].set_agent(AgentHolder::Agent(agent), p0);
+        allocations[l].set_agent_and_price(AgentHolder::Agent(agent), p0);
         // RECURSION!!!
         allocate(
             allocations,
@@ -320,13 +401,16 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             render_pipe.clone(),
         )?;
     }
-
-    for l in it.rev() {
-        let p = allocations[l].price();
-        allocations[l].set_agent(AgentHolder::Agent(agents.pop().unwrap()), p);
+    if let Some(restore_to) = restore_to {
+        assert!(!ignore_upper_b);
+        for l in (restore_to..=end).rev() {
+            let p = allocations[l].price();
+            allocations[l].set_agent(AgentHolder::Agent(agents.pop().unwrap()));
+        }
     }
-}
 
+    Ok(())
+}
 
 // Recursive allocation function.
 // Allocations from [b, a) must be non empty.
@@ -334,7 +418,7 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
 pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     mut allocations: &mut [Allocation<F, AgentHolder<A>, I>],
     i: usize,
-    boundary: Some(usize),
+    boundary: Option<usize>,
     epsilon: F,
     max_iter: usize,
     render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
@@ -355,43 +439,103 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             // We allocate depending on the direction.
             if b < i {
                 let s = b + 1;
-                align_down(allocations, i, s, epsilon, max_iter, render_pipe.clone())?;
+                align_down(
+                    allocations,
+                    i,
+                    s,
+                    false,
+                    epsilon,
+                    max_iter,
+                    render_pipe.clone(),
+                )?;
 
                 // Check if the final agent prefers a lower agent - if so we must shift up!!
                 // TODO: could it be possible that final agent doublecrosses and prefers a lower allocation? What do we do then?
-                if allocations[s]
-                    .agent()
-                    .utility(allocations[b].quality(), allocations[b].price())
-                    > allocations[s].utility() + epsilon
-                {
+                if allocations[s].prefers(&allocations[b], epsilon) {
                     // We must promote agent at b because we cannot get under it.
-                    let to_promote = allocations[b].agent_mut().take().unwrap();
+                    // let to_promote = allocations[b].agent_mut().take().to_option().unwrap();
+                    displace(allocations, b, i);
+                    // Remove agent for now.
+                    let to_promote = allocations[i].agent_mut().take();
+                    println!(
+                        "promoted: b={}, i={}, prom_id={}",
+                        b,
+                        i,
+                        to_promote.agent().agent_id()
+                    );
                     // Take all the agents up to a.
-                    align_up(allocations, i - 1, b, epsilon, max_iter, render_pipe.clone())?;
-                    let (b_promoted, p_promoted) = envelope_boundary(allocations, allocations[i].quality(), epsilon, max_iter);
+                    align_up(
+                        allocations,
+                        b,
+                        i - 1,
+                        true,
+                        epsilon,
+                        max_iter,
+                        render_pipe.clone(),
+                    )?;
+                    let (b_promoted, p_promoted) =
+                        envelope_boundary(allocations, allocations[i].quality(), epsilon, max_iter)
+                            .ok_or(FractalError::NoBoundary)?;
                     // Add the promoted agent. The algorithm relies on this being a valid allocation.
-                    allocations[i].set_agent(to_promote, p_promoted);
-                    allocate(allocations, i, b_promoted, epsilon, max_iter, render_pipe.clone())?;
+                    // We have already moved our
+                    allocations[i].set_agent(to_promote);
+                    allocate(
+                        allocations,
+                        i,
+                        Some(b_promoted),
+                        epsilon,
+                        max_iter,
+                        render_pipe.clone(),
+                    )?;
                 }
             } else if i < b {
                 let s = b - 1;
-                align_down(allocations, i, s, epsilon, max_iter, render_pipe.clone())?;
+                align_up(
+                    allocations,
+                    i,
+                    s,
+                    true,
+                    epsilon,
+                    max_iter,
+                    render_pipe.clone(),
+                )?;
 
                 // Check if the final agent prefers a higher agent - if so we must shift up!!
                 // TODO: could it be possible that final agent doublecrosses and prefers a lower allocation? What do we do then?
-                if allocations[s]
-                    .agent()
-                    .utility(allocations[b].quality(), allocations[b].price())
-                    > allocations[s].utility() + epsilon
-                {
+                if allocations[s].prefers(&allocations[b], epsilon) {
                     // We must demote agent at b because we cannot get under it.
-                    let to_demote = allocations[b].agent_mut().take().unwrap();
+                    displace(allocations, b, i);
+                    // Remove agent for now.
+                    let to_demote = allocations[i].agent_mut().take();
+                    println!(
+                        "demoted: b={}, i={}, prom_id={}",
+                        b,
+                        i,
+                        to_demote.agent().agent_id()
+                    );
                     // Take all the agents up to a.
-                    align_up(allocations, i + 1, b, epsilon, max_iter, render_pipe.clone())?;
-                    let (b_demoted, p_demoted) = envelope_boundary(allocations, allocations[i].quality(), epsilon, max_iter);
+                    align_down(
+                        allocations,
+                        b,
+                        i + 1,
+                        true,
+                        epsilon,
+                        max_iter,
+                        render_pipe.clone(),
+                    )?;
+                    let (b_demoted, p_demoted) =
+                        envelope_boundary(allocations, allocations[i].quality(), epsilon, max_iter)
+                            .ok_or(FractalError::NoBoundary)?;
                     // Add the promoted agent. The algorithm relies on this being a valid allocation.
-                    allocations[i].set_agent(to_demote, p_demoted);
-                    allocate(allocations, i, b_demoted, epsilon, max_iter, render_pipe.clone())?;
+                    allocations[i].set_agent(to_demote);
+                    allocate(
+                        allocations,
+                        i,
+                        Some(b_demoted),
+                        epsilon,
+                        max_iter,
+                        render_pipe.clone(),
+                    )?;
                 }
             }
         }
@@ -411,7 +555,7 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
 ) -> FractalResult<Vec<Allocation<F, A, I>>> {
     assert_eq!(agents.len(), items.len());
 
-    let mut allocations: Vec<Allocation<F, A, I>> = Vec::new();
+    let mut allocations: Vec<Allocation<F, AgentHolder<A>, I>> = Vec::new();
 
     // The allocation loop.
     while !items.is_empty() {
@@ -422,7 +566,7 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         } else {
             // Should have a boundary point if there are existing allocations.
             let (b, p1) = envelope_boundary(&allocations, q0, epsilon, max_iter)
-                .ok_or(FractalError::NoSupport)?;
+                .ok_or(FractalError::NoBoundary)?;
             (Some(b), p1)
         };
 
@@ -434,14 +578,65 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             0 // There should be only one agent left.
         };
 
-        let new_allocation = Allocation::new(AgentHolder::Agent(agents.remove(a)), items.remove(0), p0);
+        let new_allocation =
+            Allocation::new(AgentHolder::Agent(agents.remove(a)), items.remove(0), p0);
         let i = allocations.len();
-        allocations.push(new_allocation);
 
         // By calling this recursive function we ensure that the newly added agent is dealt with such that
         // the resulting allocation state is valid.
-        allocate(&mut allocations, i, b, epsilon, max_iter, render_pipe.clone())?;
+        println!(
+            "Alloc i={}, b={:?}, p0={}, q0={}, id={}",
+            i,
+            b,
+            p0.to_f32().unwrap(),
+            q0.to_f32().unwrap(),
+            new_allocation.agent().agent_id()
+        );
+
+        allocations.push(new_allocation);
+
+        if allocations.len() > 1 {
+            *render_pipe.lock().unwrap().deref_mut() = Some(
+                allocations
+                    .iter()
+                    .map(|x| RenderAllocation::from_allocation(&x, F::one(), epsilon, max_iter))
+                    .collect(),
+            );
+
+            //std::thread::sleep(Duration::from_millis(300));
+        }
+
+        // if allocations.len() == 137 {
+        //     loop {
+        //         sleep(Duration::from_secs(1));
+        //     }
+        // }
+
+        allocate(
+            &mut allocations,
+            i,
+            b,
+            epsilon,
+            max_iter,
+            render_pipe.clone(),
+        )?;
     }
 
-    Ok(allocations)
+    let mut cleaned = Vec::with_capacity(allocations.len());
+
+    for alloc in allocations {
+        let p = alloc.price();
+        let (mut agent, item) = alloc.decompose();
+
+        cleaned.push(Allocation::new(
+            agent
+                .take()
+                .to_option()
+                .ok_or(FractalError::EmptyAllocation)?,
+            item,
+            p,
+        ));
+    }
+
+    Ok(cleaned)
 }
