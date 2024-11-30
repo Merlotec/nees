@@ -318,13 +318,6 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         }
     }
 
-    if allocations.len() > 69 {
-        if allocations[69].prefers(&allocations[68], epsilon) {
-            let pd = allocations[69].indifferent_price(allocations[68].quality(), epsilon, max_iter).unwrap();
-            println!("PREFERS !!!!!!: {:?}", pd.to_f64().unwrap());
-        }
-
-    }
 
     Ok(())
 }
@@ -369,7 +362,7 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             // TODO: If the inner_b < a then it is an old agent, but we know that it does not interfere due to it previously being a valid allocation.
             // This is because for this to be a problem, the allocations must have been farther out in the previous valid state which is a contradiction.
             (
-                if inner_b <= start {
+                if inner_b <= end {
                     Some(inner_b)
                 } else {
                     restore_to = Some(l);
@@ -382,8 +375,8 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         };
 
         // Find the steepest boundary.
-        let agent = if l > end {
-            let q1 = allocations[l - 1].quality();
+        let agent = if l < end {
+            let q1 = allocations[l + 1].quality();
             let (a, p1) = next_agent_up(&agents, q0, p0, q1, epsilon, max_iter)?;
             agents.remove(a)
         } else {
@@ -452,6 +445,8 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                 // Check if the final agent prefers a lower agent - if so we must shift up!!
                 // TODO: could it be possible that final agent doublecrosses and prefers a lower allocation? What do we do then?
                 if allocations[s].prefers(&allocations[b], epsilon) {
+                    // TODO: agent s should be allocated first in some cases??
+                    println!("p_star={}, p={}", allocations[b].indifferent_price(allocations[s].quality(), epsilon, max_iter).unwrap().to_f64().unwrap(), allocations[s].price().to_f64().unwrap());
                     // We must promote agent at b because we cannot get under it.
                     // let to_promote = allocations[b].agent_mut().take().to_option().unwrap();
                     displace(allocations, b, i);
@@ -464,6 +459,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                         to_promote.agent().agent_id()
                     );
                     // Take all the agents up to a.
+                    // TODO: problem here??
                     align_up(
                         allocations,
                         b,
