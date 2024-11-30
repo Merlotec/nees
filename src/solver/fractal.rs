@@ -234,7 +234,6 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     conventional_alignment: bool,
     epsilon: F,
     max_iter: usize,
-    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
 ) -> FractalResult<()> {
     assert!(end <= start);
     let agent_holders: Vec<AgentHolder<A>> = allocations[end..=start]
@@ -310,7 +309,6 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             inner_b,
             epsilon,
             max_iter,
-            render_pipe.clone(),
         )?;
     }
 
@@ -324,17 +322,19 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             println!("align_down, restore: l={}, id={}, p={}", l, agent.agent_id(), allocations[l].price().to_f64().unwrap());
             allocations[l].set_agent(AgentHolder::Agent(agent));
         }
+        // In case of an order switch we need to realign.
+        align_up(allocations, end, restore_to, true, epsilon, max_iter)?;
     }
 
     // TODO: we dont always restore agents when the actual allocation point is farther out than the boundary (due to lower pressure).
-    if allocations.len() > 93 {
-        if allocations[92].prefers(&allocations[93], epsilon) {
-            println!("PREFERS (92)!!");
-        }
-        if allocations[93].prefers(&allocations[81], epsilon) {
-            println!("PREFERS (93)!!");
-        }
-    }
+    // if allocations.len() > 92 {
+    //     if allocations[92].prefers(&allocations[91], epsilon) {
+    //         println!("BANG: pindiff={}, p_actual={}", allocations[92].indifferent_price(allocations[91].quality(), epsilon, max_iter).unwrap().to_f64().unwrap(), allocations[91].price().to_f64().unwrap());
+    //     }
+    //     if allocations[91].prefers(&allocations[92], epsilon) {
+    //         println!("bingo");
+    //     }
+    // }
 
     Ok(())
 }
@@ -347,7 +347,6 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     conventional_alignment: bool,
     epsilon: F,
     max_iter: usize,
-    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
 ) -> FractalResult<()> {
     assert!(end >= start);
     let agent_holders: Vec<AgentHolder<A>> = allocations[start..=end]
@@ -393,7 +392,7 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
 
         if !conventional_alignment && allocations[l].price() > p0 {
             // Old price was greater, meaning we can restore...
-            // TODO: might ignore double-crossings lower down???
+            // TODO: order problems? and dc coming from lower down?
             restore_to = Some(l);
             break;
         }
@@ -418,7 +417,6 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             inner_b,
             epsilon,
             max_iter,
-            render_pipe.clone(),
         )?;
     }
     if let Some(restore_to) = restore_to {
@@ -429,6 +427,8 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             println!("align_down, restore: l={}, id={}, p={}", l, agent.agent_id(), allocations[l].price().to_f64().unwrap());
             allocations[l].set_agent(AgentHolder::Agent(agent));
         }
+        // In case of an order switch we need to realign.
+        align_down(allocations, end, restore_to, true, epsilon, max_iter)?;
     }
 
     Ok(())
@@ -443,7 +443,6 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     boundary: Option<usize>,
     epsilon: F,
     max_iter: usize,
-    render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
 ) -> FractalResult<()> {
     if let Some(b) = boundary {
         if i < allocations.len() {
@@ -455,7 +454,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             return Err(FractalError::InvalidInsertion);
         }
 
-        if i.abs_diff(b) > 1 {
+        if i.abs_diff(b) > 0 {
             // We have a double-crossing.
             // Must dismantle all items from (b, a) and attempt to reallocate.
             // We allocate depending on the direction.
@@ -468,7 +467,6 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                     false,
                     epsilon,
                     max_iter,
-                    render_pipe.clone(),
                 )?;
 
                 // Check if the final agent prefers a lower agent - if so we must shift up!!
@@ -490,11 +488,14 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                         true,
                         epsilon,
                         max_iter,
-                        render_pipe.clone(),
                     )?;
+
                     let (b_promoted, p_promoted) =
                         envelope_boundary(allocations, allocations[i].quality(), epsilon, max_iter)
                             .ok_or(FractalError::NoBoundary)?;
+
+                    // Otherwise the promotion was invalid!!
+                    //assert!(p_promoted <= allocations[i].price());
 
                     println!(
                         "promoted: b={}, b_prom={}, i={}, prom_id={}",
@@ -513,7 +514,6 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                         Some(b_promoted),
                         epsilon,
                         max_iter,
-                        render_pipe.clone(),
                     )?;
 
                     if allocations.len() > 93 {
@@ -535,7 +535,6 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                     false,
                     epsilon,
                     max_iter,
-                    render_pipe.clone(),
                 )?;
 
                 // Check if the final agent prefers a higher agent - if so we must shift up!!
@@ -559,7 +558,6 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                         true,
                         epsilon,
                         max_iter,
-                        render_pipe.clone(),
                     )?;
                     let (b_demoted, p_demoted) =
                         envelope_boundary(allocations, allocations[i].quality(), epsilon, max_iter)
@@ -572,7 +570,6 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                         Some(b_demoted),
                         epsilon,
                         max_iter,
-                        render_pipe.clone(),
                     )?;
                 }
             }
@@ -656,7 +653,6 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             b,
             epsilon,
             max_iter,
-            render_pipe.clone(),
         )?;
     }
 
