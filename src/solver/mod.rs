@@ -125,7 +125,7 @@ pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType
 
     for (i, allocation_i) in allocations.iter().enumerate() {
         let u = allocation_i.agent.utility(allocation_i.price, allocation_i.item.quality());
-        if (u - allocation_i.utility).abs() > epsilon {
+        if (u - allocation_i.utility()).abs() > epsilon {
             println!("Agent {} has a utility mismatch!", i);
             return false;
         }

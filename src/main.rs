@@ -18,7 +18,7 @@ fn main() {
     // ];
 
     let epsilon = 1e-7;
-    let max_iter = 400;
+    let max_iter = 500;
     let n = 200;
     //let mut world = distribution::create_world::<f64>(100, 100);
 

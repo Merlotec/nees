@@ -282,6 +282,13 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             return Err(FractalError::NoBoundary);
         };
 
+        if !conventional_alignment && allocations[l].price() > p0 {
+            // Old price was greater, meaning we can restore...
+            // TODO: might ignore double-crossings lower down???
+            restore_to = Some(l);
+            break;
+        }
+
         // May need to promote since we have pushed all the agents out (so may cross over the DC agent).
         // Find the steepest boundary.
         let agent = if l > end {
@@ -309,6 +316,7 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
 
     // If there are still agents to allocate we allocate them up from the bottom (since this means that we break due to a recrossing).
     // Reverse again to go up from the s.
+    // TODO: order swap IS an issue
     if let Some(restore_to) = restore_to {
         assert!(!conventional_alignment);
         for l in end..=restore_to {
@@ -318,9 +326,13 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         }
     }
 
-    if allocations.len() > 94 {
-        if allocations[93].prefers(&allocations[94], epsilon) {
-            println!("PREFERS!!");
+    // TODO: we dont always restore agents when the actual allocation point is farther out than the boundary (due to lower pressure).
+    if allocations.len() > 93 {
+        if allocations[92].prefers(&allocations[93], epsilon) {
+            println!("PREFERS (92)!!");
+        }
+        if allocations[93].prefers(&allocations[81], epsilon) {
+            println!("PREFERS (93)!!");
         }
     }
 
@@ -379,6 +391,13 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             return Err(FractalError::NoBoundary);
         };
 
+        if !conventional_alignment && allocations[l].price() > p0 {
+            // Old price was greater, meaning we can restore...
+            // TODO: might ignore double-crossings lower down???
+            restore_to = Some(l);
+            break;
+        }
+
         // Find the steepest boundary.
         let agent = if l < end {
             let q1 = allocations[l + 1].quality();
@@ -388,6 +407,9 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             // Last agent to allocate, can allocate wherever.
             agents.pop().ok_or(FractalError::NoCandidate)?
         };
+
+        println!("align_up: l={}, id={}, b={:?}, p={}", l, agent.agent_id(), inner_b, p0.to_f64().unwrap());
+
         allocations[l].set_agent_and_price(AgentHolder::Agent(agent), p0);
         // RECURSION!!!
         allocate(
@@ -402,8 +424,10 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     if let Some(restore_to) = restore_to {
         assert!(!conventional_alignment);
         for l in (restore_to..=end).rev() {
-            let p = allocations[l].price();
-            allocations[l].set_agent(AgentHolder::Agent(agents.pop().unwrap()));
+
+            let agent = agents.pop().unwrap();
+            println!("align_down, restore: l={}, id={}, p={}", l, agent.agent_id(), allocations[l].price().to_f64().unwrap());
+            allocations[l].set_agent(AgentHolder::Agent(agent));
         }
     }
 
@@ -457,12 +481,6 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                     displace(allocations, b, i);
                     // Remove agent for now.
                     let to_promote = allocations[i].agent_mut().take();
-                    println!(
-                        "promoted: b={}, i={}, prom_id={}",
-                        b,
-                        i,
-                        to_promote.agent().agent_id()
-                    );
                     // Take all the agents up to a.
                     // TODO: problem here??
                     align_up(
@@ -477,9 +495,18 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                     let (b_promoted, p_promoted) =
                         envelope_boundary(allocations, allocations[i].quality(), epsilon, max_iter)
                             .ok_or(FractalError::NoBoundary)?;
+
+                    println!(
+                        "promoted: b={}, b_prom={}, i={}, prom_id={}",
+                        b,
+                        b_promoted,
+                        i,
+                        to_promote.agent().agent_id()
+                    );
+
                     // Add the promoted agent. The algorithm relies on this being a valid allocation.
                     // We have already moved our
-                    allocations[i].set_agent(to_promote);
+                    allocations[i].set_agent_and_price(to_promote, p_promoted);
                     allocate(
                         allocations,
                         i,
@@ -488,6 +515,15 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                         max_iter,
                         render_pipe.clone(),
                     )?;
+
+                    if allocations.len() > 93 {
+                        if allocations[92].prefers(&allocations[93], epsilon) {
+                            println!("PREFERS (92)!!");
+                        }
+                        if allocations[93].prefers(&allocations[92], epsilon) {
+                            println!("PREFERS (93)!!");
+                        }
+                    }
                 }
             } else if i < b {
                 let s = b - 1;
@@ -529,7 +565,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                         envelope_boundary(allocations, allocations[i].quality(), epsilon, max_iter)
                             .ok_or(FractalError::NoBoundary)?;
                     // Add the promoted agent. The algorithm relies on this being a valid allocation.
-                    allocations[i].set_agent(to_demote);
+                    allocations[i].set_agent_and_price(to_demote, p_demoted);
                     allocate(
                         allocations,
                         i,
