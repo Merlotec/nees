@@ -299,7 +299,7 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         // RECURSION!!!
         allocate(
             allocations,
-            start,
+            l,
             inner_b,
             epsilon,
             max_iter,
@@ -392,7 +392,7 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         // RECURSION!!!
         allocate(
             allocations,
-            start,
+            l,
             inner_b,
             epsilon,
             max_iter,
@@ -491,6 +491,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                 }
             } else if i < b {
                 let s = b - 1;
+                println!("align_up.... i={}, s={}", i, s);
                 align_up(
                     allocations,
                     i,
