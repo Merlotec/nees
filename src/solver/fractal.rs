@@ -231,7 +231,7 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     mut allocations: &mut [Allocation<F, AgentHolder<A>, I>],
     start: usize,
     end: usize,
-    ignore_lower_b: bool,
+    conventional_alignment: bool,
     epsilon: F,
     max_iter: usize,
     render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
@@ -252,10 +252,10 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         let q0 = allocations[l].quality();
         // Start with a.
         // Since we are first allocation, we can take the current price of the allocation as given.
-        let (inner_b, p0) = if l == start {
+        let (inner_b, p0) = if l == start && !conventional_alignment {
             (None, allocations[l].price())
         } else if let Some((inner_b, p)) = envelope_boundary(
-            if ignore_lower_b {
+            if conventional_alignment {
                 &allocations[start..allocations.len()]
             } else {
                 &allocations
@@ -293,7 +293,7 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             agents.pop().ok_or(FractalError::NoCandidate)?
         };
 
-        println!("align_down: l={}, id={}, p={}", l, agent.agent_id(), p0.to_f64().unwrap());
+        println!("align_down: l={}, id={}, b={:?}, p={}", l, agent.agent_id(), inner_b, p0.to_f64().unwrap());
 
         allocations[l].set_agent_and_price(AgentHolder::Agent(agent), p0);
         // RECURSION!!!
@@ -310,7 +310,7 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     // If there are still agents to allocate we allocate them up from the bottom (since this means that we break due to a recrossing).
     // Reverse again to go up from the s.
     if let Some(restore_to) = restore_to {
-        assert!(!ignore_lower_b);
+        assert!(!conventional_alignment);
         for l in end..=restore_to {
             let agent = agents.remove(0);
             println!("align_down, restore: l={}, id={}, p={}", l, agent.agent_id(), allocations[l].price().to_f64().unwrap());
@@ -318,6 +318,11 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         }
     }
 
+    if allocations.len() > 94 {
+        if allocations[93].prefers(&allocations[94], epsilon) {
+            println!("PREFERS!!");
+        }
+    }
 
     Ok(())
 }
@@ -327,7 +332,7 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     mut allocations: &mut [Allocation<F, AgentHolder<A>, I>],
     start: usize,
     end: usize,
-    ignore_upper_b: bool,
+    conventional_alignment: bool,
     epsilon: F,
     max_iter: usize,
     render_pipe: Arc<Mutex<Option<Vec<RenderAllocation>>>>,
@@ -347,10 +352,10 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         let q0 = allocations[l].quality();
         // Start with a.
         // Since we are first allocation, we can take the current price of the allocation as given.
-        let (inner_b, p0) = if l == start {
+        let (inner_b, p0) = if l == start && !conventional_alignment {
             (None, allocations[l].price())
         } else if let Some((inner_b, p)) = envelope_boundary(
-            if ignore_upper_b {
+            if conventional_alignment {
                 &allocations[0..end]
             } else {
                 &allocations
@@ -395,7 +400,7 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         )?;
     }
     if let Some(restore_to) = restore_to {
-        assert!(!ignore_upper_b);
+        assert!(!conventional_alignment);
         for l in (restore_to..=end).rev() {
             let p = allocations[l].price();
             allocations[l].set_agent(AgentHolder::Agent(agents.pop().unwrap()));
@@ -490,7 +495,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                     allocations,
                     i,
                     s,
-                    true,
+                    false,
                     epsilon,
                     max_iter,
                     render_pipe.clone(),
