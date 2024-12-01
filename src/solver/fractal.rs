@@ -11,7 +11,7 @@ use std::time::Duration;
 pub enum FractalError {
     NoIndifference,
     NoCandidate,
-    IncomeExceeded,
+    IncomeExceeded(usize),
     NoBoundary,
     NoDoublecross,
     InvalidInsertion,
@@ -113,7 +113,7 @@ pub fn next_agent_up<F: num::Float, A: Agent<FloatType = F>>(
     let mut to_allocate: Option<usize> = None;
     for (a, agent) in agents.iter().enumerate() {
         if agent.income() <= p0 {
-            return Err(FractalError::IncomeExceeded); // Should not happenn.
+            return Err(FractalError::IncomeExceeded(a)); // Should not happenn.
         }
         let p_indif = indifferent_price(
             agent,
@@ -177,6 +177,7 @@ pub fn next_agent_down<F: num::Float, A: Agent<FloatType = F>>(
         .ok_or(FractalError::NoCandidate)
 }
 
+/// Expensive call that checks through all the allocations to find the boundary point.
 pub fn envelope_boundary<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     allocations: &[Allocation<F, AgentHolder<A>, I>],
     quality: F,
@@ -191,6 +192,7 @@ pub fn envelope_boundary<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatTy
                 p_max = alloc.indifferent_price(quality, epsilon, max_iter)?;
                 i_max = Some(i);
             } else {
+                // We can optimise by checking if they prefer - as if they don't we know the price will be lower so don't need to consider.
                 let u_other = alloc.agent().utility(p_max, quality);
                 if u_other > alloc.utility() {
                     p_max = alloc.indifferent_price(quality, epsilon, max_iter)?;
@@ -281,6 +283,8 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             return Err(FractalError::NoBoundary);
         };
 
+        // TODO: cant actually use old prices for this because this only makes sense if the order remains the same.
+        // Thus we need to find a better way to allocate.
         if !conventional_alignment && allocations[l].price() > p0 {
             // Old price was greater, meaning we can restore...
             // TODO: might ignore double-crossings lower down???
@@ -292,11 +296,22 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         // Find the steepest boundary.
         let agent = if l > end {
             let q1 = allocations[l - 1].quality();
-            let (a, p1) = next_agent_down(&agents, q0, p0, q1, epsilon, max_iter)?;
+            let (a, p1) = match next_agent_down(&agents, q0, p0, q1, epsilon, max_iter) {
+                Ok(x) => x,
+                Err(FractalError::NoCandidate) | Err(FractalError::IncomeExceeded(_)) => {
+                    // Repair the currently empty allocations.
+                    for r in end..=l {
+                        let agent = agents.remove(0);
+                        allocations[r].set_agent(AgentHolder::Agent(agent));
+                    }
+                    return Err(FractalError::NoCandidate);
+                },
+                Err(e) => return Err(e),
+            };
             agents.remove(a)
         } else {
             // Last agent to allocate, can allocate wherever.
-            agents.pop().ok_or(FractalError::NoCandidate)?
+            agents.pop().unwrap()
         };
 
         println!("align_down: l={}, id={}, b={:?}, p={}", l, agent.agent_id(), inner_b, p0.to_f64().unwrap());
@@ -327,12 +342,9 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     }
 
     // TODO: we dont always restore agents when the actual allocation point is farther out than the boundary (due to lower pressure).
-    if allocations.len() > 96 && start >= 96 && end <= 96  {
-        if allocations[96].prefers(&allocations[92], epsilon) {
-            println!("BANG: p_actual={}",  allocations[96].price().to_f64().unwrap());
-        }
-        if allocations[96].prefers(&allocations[93], epsilon) {
-            println!("bingo");
+    if allocations.len() > 45 && start >= 44 && end <= 45  {
+        if allocations[44].prefers(&allocations[45], epsilon) {
+            println!("BANG: p_actual={}",  allocations[44].price().to_f64().unwrap());
         }
     }
 
@@ -400,11 +412,22 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         // Find the steepest boundary.
         let agent = if l < end {
             let q1 = allocations[l + 1].quality();
-            let (a, p1) = next_agent_up(&agents, q0, p0, q1, epsilon, max_iter)?;
+            let (a, p1) = match next_agent_up(&agents, q0, p0, q1, epsilon, max_iter) {
+                Ok(x) => x,
+                Err(FractalError::NoCandidate) => {
+                    // Repair the currently empty allocations.
+                    for r in (l..=end).rev() {
+                        let agent = agents.pop().unwrap();
+                        allocations[r].set_agent(AgentHolder::Agent(agent));
+                    }
+                    return Err(FractalError::NoCandidate);
+                },
+                Err(e) => return Err(e),
+            };
             agents.remove(a)
         } else {
             // Last agent to allocate, can allocate wherever.
-            agents.pop().ok_or(FractalError::NoCandidate)?
+            agents.pop().unwrap()
         };
 
         println!("align_up: l={}, id={}, b={:?}, p={}", l, agent.agent_id(), inner_b, p0.to_f64().unwrap());
@@ -469,19 +492,23 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             // We allocate depending on the direction.
             if b < i {
                 let s = b + 1;
-                align_down(
+                let promote = match align_down(
                     allocations,
                     i,
                     s,
                     false,
                     epsilon,
                     max_iter,
-                )?;
+                ) {
+                    Ok(_) => allocations[b].is_preferred_by(&allocations[s..=i], epsilon),
+                    Err(FractalError::NoCandidate) => true,
+                    Err(e) => return Err(e),
+                };
 
                 // Check if any just allocated agents prefer the dc agent. We have to do this because there may be a double crossing in the just allocated agents
                 // such that the lowest agent does not prefer this allocation but higher agents do.
                 // This is actually because there could be an order shift on the way down.
-                if allocations[b].is_preferred_by(&allocations[s..=i], epsilon) {
+                if promote {
                     // TODO: agent s should be allocated first in some cases??
                     println!("p_star={}, p={}", allocations[b].indifferent_price(allocations[s].quality(), epsilon, max_iter).unwrap().to_f64().unwrap(), allocations[s].price().to_f64().unwrap());
                     // We must promote agent at b because we cannot get under it.
@@ -526,30 +553,34 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                         max_iter,
                     )?;
 
-                    if allocations.len() > 93 {
-                        if allocations[92].prefers(&allocations[93], epsilon) {
-                            println!("PREFERS (92)!!");
-                        }
-                        if allocations[93].prefers(&allocations[92], epsilon) {
-                            println!("PREFERS (93)!!");
-                        }
-                    }
+                    // if allocations.len() > 93 {
+                    //     if allocations[92].prefers(&allocations[93], epsilon) {
+                    //         println!("PREFERS (92)!!");
+                    //     }
+                    //     if allocations[93].prefers(&allocations[92], epsilon) {
+                    //         println!("PREFERS (93)!!");
+                    //     }
+                    // }
                 }
             } else if i < b {
                 let s = b - 1;
                 println!("align_up.... i={}, s={}", i, s);
-                align_up(
+                let demote = match align_up(
                     allocations,
                     i,
                     s,
                     false,
                     epsilon,
                     max_iter,
-                )?;
+                ) {
+                    Ok(_) => allocations[b].is_preferred_by(&allocations[s..=i], epsilon),
+                    Err(FractalError::NoCandidate) => true,
+                    Err(e) => return Err(e),
+                };
 
                 // Check if the final agent prefers a higher agent - if so we must shift up!!
                 // TODO: could it be possible that final agent doublecrosses and prefers a lower allocation? What do we do then?
-                if allocations[b].is_preferred_by(&allocations[s..=i], epsilon) {
+                if demote {
                     // We must demote agent at b because we cannot get under it.
                     displace(allocations, b, i);
                     // Remove agent for now.
@@ -617,8 +648,11 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
 
         let a = if items.len() > 1 {
             // Calculate the agent to allocate.
-            let (a, _) = next_agent_up(&agents, q0, p0, items[1].quality(), epsilon, max_iter)?;
-            a
+            match next_agent_up(&agents, q0, p0, items[1].quality(), epsilon, max_iter) {
+                Ok((a, _)) => a,
+                Err(FractalError::IncomeExceeded(a)) => a,
+                Err(e) => return Err(e),
+            }
         } else {
             0 // There should be only one agent left.
         };
