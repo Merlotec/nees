@@ -1,3 +1,5 @@
+use std::ops::Range;
+use num::iter::RangeInclusive;
 use utility::indifferent_price;
 use crate::solver::switchbranch::AgentHolder;
 
@@ -18,6 +20,7 @@ pub trait Item {
 
     fn quality(&self) -> Self::FloatType;
 }
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct Allocation<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> {
     agent: A,
     item: I,
@@ -216,6 +219,48 @@ pub fn favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
     }
 
     fav.map(|x| (x, u_max))
+}
+
+pub fn min_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
+    allocations: &[Allocation<F, A, I>],
+    range: std::ops::RangeInclusive<usize>,
+    epsilon: F,
+) -> Option<usize> {
+    let mut fav_min: Option<usize> = None;
+    for l in range {
+        if let Some((fav, _)) = favourite(allocations[l].agent(), allocations, epsilon) {
+            if let Some(min) = &mut fav_min {
+                if &fav < min {
+                    *min = fav;
+                }
+            } else {
+                fav_min = Some(fav);
+            }
+        }
+    }
+
+    fav_min
+}
+
+pub fn max_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
+    allocations: &[Allocation<F, A, I>],
+    range: std::ops::RangeInclusive<usize>,
+    epsilon: F,
+) -> Option<usize> {
+    let mut fav_max: Option<usize> = None;
+    for l in range {
+        if let Some((fav, _)) = favourite(allocations[l].agent(), allocations, epsilon) {
+            if let Some(min) = &mut fav_max {
+                if &fav > min {
+                    *min = fav;
+                }
+            } else {
+                fav_max = Some(fav);
+            }
+        }
+    }
+
+    fav_max
 }
 
 pub fn boundary_point<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
