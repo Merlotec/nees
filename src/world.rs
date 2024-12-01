@@ -140,10 +140,9 @@ impl<F: num::Float> World<F> {
     /// and income is positive for all agents.
     pub fn validate(&self) -> bool {
         self.households.iter().all(|h| {
-            h.aspiration >= F::zero()
-                && h.aspiration <= F::one()
-                && h.income > F::zero()
-                && self.schools.iter().all(|s| s.quality > F::zero())
+            h.aspiration < F::from(0.97).unwrap()
+            && h.income > F::from(1.0).unwrap()
+            && self.schools.iter().all(|s| s.quality > F::from(0.03).unwrap())
         })
     }
 }
