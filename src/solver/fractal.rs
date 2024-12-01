@@ -242,7 +242,7 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         .collect();
     let mut agents = Vec::with_capacity(agent_holders.len());
     for ah in agent_holders {
-        agents.push(ah.to_option().ok_or(FractalError::NoIntermediateAgent)?);
+        agents.push(ah.to_option().ok_or(FractalError::NoIntermediateAgent).unwrap());
     }
 
     let mut restore_to: Option<usize> = None;
@@ -316,7 +316,7 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     // Reverse again to go up from the s.
     // TODO: order swap IS an issue
     if let Some(restore_to) = restore_to {
-        assert!(!conventional_alignment);
+        //assert!(!conventional_alignment);
         for l in end..=restore_to {
             let agent = agents.remove(0);
             println!("align_down, restore: l={}, id={}, p={}", l, agent.agent_id(), allocations[l].price().to_f64().unwrap());
@@ -327,14 +327,14 @@ fn align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     }
 
     // TODO: we dont always restore agents when the actual allocation point is farther out than the boundary (due to lower pressure).
-    // if allocations.len() > 92 {
-    //     if allocations[92].prefers(&allocations[91], epsilon) {
-    //         println!("BANG: pindiff={}, p_actual={}", allocations[92].indifferent_price(allocations[91].quality(), epsilon, max_iter).unwrap().to_f64().unwrap(), allocations[91].price().to_f64().unwrap());
-    //     }
-    //     if allocations[91].prefers(&allocations[92], epsilon) {
-    //         println!("bingo");
-    //     }
-    // }
+    if allocations.len() > 96 && start >= 96 && end <= 96  {
+        if allocations[96].prefers(&allocations[92], epsilon) {
+            println!("BANG: p_actual={}",  allocations[96].price().to_f64().unwrap());
+        }
+        if allocations[96].prefers(&allocations[93], epsilon) {
+            println!("bingo");
+        }
+    }
 
     Ok(())
 }
@@ -355,7 +355,7 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         .collect();
     let mut agents = Vec::with_capacity(agent_holders.len());
     for ah in agent_holders {
-        agents.push(ah.to_option().ok_or(FractalError::NoIntermediateAgent)?);
+        agents.push(ah.to_option().ok_or(FractalError::NoIntermediateAgent).unwrap());
     }
     let mut restore_to: Option<usize> = None;
 
@@ -420,15 +420,24 @@ fn align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         )?;
     }
     if let Some(restore_to) = restore_to {
-        assert!(!conventional_alignment);
+        //assert!(!conventional_alignment);
         for l in (restore_to..=end).rev() {
 
             let agent = agents.pop().unwrap();
-            println!("align_down, restore: l={}, id={}, p={}", l, agent.agent_id(), allocations[l].price().to_f64().unwrap());
+            println!("align_up, restore: l={}, id={}, p={}", l, agent.agent_id(), allocations[l].price().to_f64().unwrap());
             allocations[l].set_agent(AgentHolder::Agent(agent));
         }
         // In case of an order switch we need to realign.
         align_down(allocations, end, restore_to, true, epsilon, max_iter)?;
+    }
+
+    if allocations.len() > 96 && start >= 96 && end <= 96  {
+        if allocations[96].prefers(&allocations[92], epsilon) {
+            println!("XXBANG: p_actual={}",  allocations[96].price().to_f64().unwrap());
+        }
+        if allocations[96].prefers(&allocations[93], epsilon) {
+            println!("xxbingo");
+        }
     }
 
     Ok(())
@@ -469,9 +478,10 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                     max_iter,
                 )?;
 
-                // Check if the final agent prefers a lower agent - if so we must shift up!!
-                // TODO: could it be possible that final agent doublecrosses and prefers a lower allocation? What do we do then?
-                if allocations[s].prefers(&allocations[b], epsilon) {
+                // Check if any just allocated agents prefer the dc agent. We have to do this because there may be a double crossing in the just allocated agents
+                // such that the lowest agent does not prefer this allocation but higher agents do.
+                // This is actually because there could be an order shift on the way down.
+                if allocations[b].is_preferred_by(&allocations[s..=i], epsilon) {
                     // TODO: agent s should be allocated first in some cases??
                     println!("p_star={}, p={}", allocations[b].indifferent_price(allocations[s].quality(), epsilon, max_iter).unwrap().to_f64().unwrap(), allocations[s].price().to_f64().unwrap());
                     // We must promote agent at b because we cannot get under it.
@@ -539,7 +549,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
 
                 // Check if the final agent prefers a higher agent - if so we must shift up!!
                 // TODO: could it be possible that final agent doublecrosses and prefers a lower allocation? What do we do then?
-                if allocations[s].prefers(&allocations[b], epsilon) {
+                if allocations[b].is_preferred_by(&allocations[s..=i], epsilon) {
                     // We must demote agent at b because we cannot get under it.
                     displace(allocations, b, i);
                     // Remove agent for now.

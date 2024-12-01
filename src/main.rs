@@ -40,7 +40,7 @@ fn main() {
 
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(5));
-        let allocations: Vec<Allocation<f64, Household<f64>, House<f64>>> =
+        let allocations =
             fractal::root(
                 world.households,
                 world.houses,

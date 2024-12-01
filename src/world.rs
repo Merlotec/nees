@@ -56,6 +56,7 @@ impl<F: num::Float> Agent for Household<F> {
     fn utility(&self, price: F, quality: F) -> F {
         // Additively separable utility function.
         ((self.income - price) / F::from(100.0).unwrap()).powf(F::one() - self.aspiration) + quality.powf(self.aspiration)
+        //(((F::one() - self.aspiration) * (self.income - price) / F::from(100.0).unwrap()).powf(F::from(0.5).unwrap()) + (self.aspiration * quality).powf(F::from(0.5).unwrap())).powf(F::from(2.0).unwrap())
     }
 
 

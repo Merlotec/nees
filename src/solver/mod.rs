@@ -110,6 +110,15 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
     pub fn prefers(&self, other: &Self, epsilon: F) -> bool {
         self.agent().utility(other.price(), other.quality()) > self.utility() + epsilon
     }
+
+    pub fn is_preferred_by(&self, others: &[Self], epsilon: F) -> bool {
+        for other in others {
+            if other.prefers(self, epsilon) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 pub struct Solver<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> {
