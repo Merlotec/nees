@@ -18,8 +18,8 @@ fn main() {
     // ];
 
     let epsilon = 1e-8;
-    let max_iter = 500;
-    let n = 500;
+    let max_iter = 200;
+    let n = 200;
     //let mut world = distribution::create_world::<f64>(100, 100);
 
     let mut actual_n = n;
