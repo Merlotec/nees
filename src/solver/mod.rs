@@ -20,7 +20,7 @@ pub trait Item {
 
     fn quality(&self) -> Self::FloatType;
 }
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Allocation<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> {
     agent: A,
     item: I,

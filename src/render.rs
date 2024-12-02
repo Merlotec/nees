@@ -22,7 +22,12 @@ use crate::solver::{Agent, Allocation, Item};
 use crate::solver::utility::generate_indifference_curve;
 // Data structures
 
-const CIRCLE_RAD: f32 = 5.0;
+const CIRCLE_RAD: f32 = 3.0;
+const CIRCLE_CUR_COL: Srgba = Srgba::GREEN;
+const CIRCLE_COL: Srgba = Srgba::new(0.6, 0.6, 1.0, 1.0);
+const CIRCLE_SEL_COL: Srgba = Srgba::new(1.0, 0.65, 0.01, 1.0);
+const LINE_COL: Srgba = Srgba::new(0.45, 0.4, 0.4, 1.0);
+const LINE_SEL_COL: Srgba = Srgba::new(0.9, 0.6, 0.6, 1.0);
 
 #[derive(Clone)]
 pub struct RenderAllocation {
@@ -349,7 +354,7 @@ fn draw_allocations(
                 let color = if i == current_idx {
                     Color::Srgba(Srgba::GREEN)
                 } else {
-                    Color::Srgba(Srgba::WHITE)
+                    Color::Srgba(LINE_COL)
                 };
     
                 let stroke = Stroke::new(color, 1.0);
@@ -389,9 +394,9 @@ fn draw_allocations(
                 let circle_radius = CIRCLE_RAD; // Adjust circle size
     
                 let color = if i == current_idx {
-                    Color::Srgba(Srgba::RED)
+                    Color::Srgba(CIRCLE_CUR_COL)
                 } else {
-                    Color::Srgba(Srgba::BLUE)
+                    Color::Srgba(CIRCLE_COL)
                 };
     
                 let circle = shapes::Circle {
@@ -412,7 +417,7 @@ fn draw_allocations(
                             },
                             ..default()
                         },
-                        Stroke::new(Color::Srgba(Srgba::WHITE), 1.0),
+                        //Stroke::new(Color::Srgba(Srgba::WHITE), 1.0),
                         Fill::color(color),
                     ))
                     .insert(AllocationEntity { index: i });
@@ -450,7 +455,7 @@ fn handle_hovering(
     view_bounds: Res<ViewBounds>,
     mut hovered_allocation: ResMut<HoveredAllocation>,
     mut allocation_query: Query<(&AllocationEntity, &mut Fill), Without<IndifferenceCurve>>,
-    mut curve_query: Query<(&IndifferenceCurve, &mut Stroke), Without<AllocationEntity>>,
+    mut curve_query: Query<(&IndifferenceCurve, &mut Stroke, &mut Transform), (Without<AllocationEntity>, Without<Camera>)>,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
@@ -459,11 +464,14 @@ fn handle_hovering(
 
     // Reset previous hover highlights
     for (_entity, mut fill) in allocation_query.iter_mut() {
-        fill.color = Color::Srgba(Srgba::BLUE);
+        fill.color = Color::Srgba(CIRCLE_COL);
     }
 
-    for (_entity, mut fill) in curve_query.iter_mut() {
-        fill.color = Color::Srgba(Srgba::WHITE);
+    for (entity, mut fill, mut transform) in curve_query.iter_mut() {
+        fill.color = Color::Srgba(LINE_COL);
+        if allocations_res.allocations.len() > 0 {
+            transform.translation.z = -(entity.index as f32 / allocations_res.allocations.len() as f32) - 1.0;
+        }
     }
 
     if let Ok(window) = window.get_single() {
@@ -489,15 +497,17 @@ fn handle_hovering(
                 if distance <= circle_radius * view_bounds.zoom {
                     hovered_idx = Some(allocation_entity.index);
 
-                    fill.color = Color::Srgba(Srgba::new(1.0, 0.65, 0.01, 1.0));
+                    fill.color = Color::Srgba(CIRCLE_SEL_COL);
+                    break;
                 }
             }
 
             // Highlight the indifference curve of the hovered allocation
             if let Some(idx) = hovered_idx {
-                for (curve_entity, mut stroke) in curve_query.iter_mut() {
+                for (curve_entity, mut stroke, mut transform) in curve_query.iter_mut() {
                     if curve_entity.index == idx {
-                        stroke.color = Color::Srgba(Srgba::RED);
+                        stroke.color = Color::Srgba(LINE_SEL_COL);
+                        transform.translation.z = 0.0;
                     }
                 }
             }

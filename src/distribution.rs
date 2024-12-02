@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 
-use rand_distr::{uniform::SampleUniform, Distribution, LogNormal, Normal, StandardNormal, Uniform};
+use rand_distr::{uniform::SampleUniform, Beta, Distribution, LogNormal, Normal, Open01, StandardNormal, Uniform};
 
 use crate::world::*;
 
 pub fn create_world<F: num::Float + SampleUniform>(school_count: usize, house_count: usize) -> World<F>
-where StandardNormal: Distribution<F> {
+where StandardNormal: Distribution<F>, Open01: Distribution<F> {
     assert!(house_count % school_count == 0);
 
     let school_capacity = (house_count / school_count) as isize;
@@ -16,11 +16,18 @@ where StandardNormal: Distribution<F> {
 
     let mut rng = rand::thread_rng();
 
-    let school_quality_distribution = Normal::<F>::new(F::from(0.8).unwrap(), F::from(0.28).unwrap()).unwrap();
+    //let school_quality_distribution = Normal::<F>::new(F::from(0.8).unwrap(), F::from(0.28).unwrap()).unwrap();
     let ability_distribution = Normal::<F>::new(F::zero(), F::one()).unwrap();
-    let aspiration_distribution = Normal::<F>::new(F::from(0.55).unwrap(), F::from(0.15).unwrap()).unwrap();
+    //let aspiration_distribution = Normal::<F>::new(F::from(0.5).unwrap(), F::from(0.15).unwrap()).unwrap();
+    let aspiration_distribution = Normal::<F>::new(F::from(0.5).unwrap(), F::from(0.2).unwrap()).unwrap();
 
-    let mean_household_inc = F::from(100.0).unwrap();
+    let q_alpha = F::from(10.415578075512496).unwrap();
+    let q_beta = F::from(5.458807204519353).unwrap();
+    let q_loc = F::from(-0.13494908716854648).unwrap();
+    let q_scale = F::from(1.1861854805071834).unwrap();
+    let school_quality_distribution = Beta::<F>::new(q_alpha, q_beta).unwrap();
+
+    let mean_household_inc = F::from(40000.0).unwrap();
     let cv = F::from(0.4).unwrap();
     let variance = (cv * mean_household_inc) * (cv * mean_household_inc);
 
@@ -34,7 +41,7 @@ where StandardNormal: Distribution<F> {
 
     // Create schools
     for _ in 0..school_count {
-        let quality = school_quality_distribution.sample(&mut rng);
+        let quality = q_loc + q_scale * school_quality_distribution.sample(&mut rng);
         let x = location_axis_distribution.sample(&mut rng);
         let y = location_axis_distribution.sample(&mut rng);
 
