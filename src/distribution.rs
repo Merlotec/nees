@@ -6,7 +6,7 @@ use crate::world::*;
 
 pub fn create_world<F: num::Float + SampleUniform>(school_count: usize, house_count: usize) -> World<F>
 where StandardNormal: Distribution<F>, Open01: Distribution<F> {
-    assert!(house_count % school_count == 0);
+    assert_eq!(house_count % school_count, 0);
 
     let school_capacity = (house_count / school_count) as isize;
 
