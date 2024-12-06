@@ -3,10 +3,9 @@ use std::{fs, ops::DerefMut, sync::{Arc, Mutex}, time::Duration};
 use serde::{de::DeserializeOwned, Serialize};
 use rand_distr::{uniform::SampleUniform, Distribution, Open01, StandardNormal};
 use render::RenderAllocation;
-use serde::Deserialize;
-use solver::{switchbranch::{self, AgentHolder}, verify_solution, Agent, Allocation};
-use world::{House, Household};
+use solver::verify_solution;
 use crate::solver::fractal;
+use crate::solver::fractal::FractalSettings;
 use crate::world::World;
 
 mod distribution;
@@ -21,14 +20,10 @@ fn main()  {
 
 fn run<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
 where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F> {
-    // let allocations = vec![
-    //     Allocation::new(Household::new(0, 100f64, 0.5f64, 0.5f64), House::new(0f64, 0f64, None, 0.6f64), 50f64),
-    //     Allocation::new(Household::new(0, 120f64, 0.6f64, 0.5f64), House::new(0f64, 0f64, None, 0.8f64), 68f64)
-    // ];
 
     let epsilon = F::from(1e-8).unwrap();
     let max_iter = 400;
-    let n = 500;
+    let n = 200;
     //let mut world = distribution::create_world::<f64>(100, 100);
 
     let mut actual_n = n;
@@ -45,8 +40,6 @@ where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F>
         fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
     }
 
-    //fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
-
     let to_allocate: Arc<Mutex<Option<Vec<RenderAllocation>>>> = Arc::new(Mutex::new(None));
     let pipe = to_allocate.clone();
 
@@ -56,9 +49,11 @@ where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F>
             fractal::root(
                 world.households,
                 world.houses,
-                epsilon,
-                max_iter,
-                pipe.clone(),
+                FractalSettings {
+                    epsilon,
+                    max_iter,
+                },
+                Some(pipe.clone()),
             )
             .unwrap();
         *pipe.lock().unwrap().deref_mut() = Some(

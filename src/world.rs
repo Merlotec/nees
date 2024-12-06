@@ -1,11 +1,3 @@
-//
-// Created by ncbmk on 10/16/24
-//
-
-use std::f64;
-use std::fmt;
-
-use num::one;
 use serde::{Deserialize, Serialize};
 use crate::solver::Agent;
 use crate::solver::Item;
@@ -27,16 +19,6 @@ impl<F: num::Float> Household<F> {
             ability,
             aspiration,
         }
-    }
-}
-
-impl<F: num::Float> Household<F> where F: fmt::Display {
-    /// Debug information about the household.
-    pub fn debug_info(&self) -> String {
-        format!(
-            "y={}\nas={}\nab={}",
-            self.income, self.aspiration, self.ability
-        )
     }
 }
 

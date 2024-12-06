@@ -1,23 +1,12 @@
-// Cargo.toml dependencies:
-// [dependencies]
-// bevy = "0.10"
-// bevy_prototype_lyon = "0.6"
-
-use bevy::color::palettes::css::WHITE;
-use bevy::math::VectorSpace;
 use bevy::prelude::*;
-use bevy::render::camera::ScalingMode;
 use bevy_prototype_lyon::prelude::*;
-use std::f32::consts::PI;
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use bevy::input::mouse::MouseWheel;
-use bevy::render::mesh::{MeshVertexAttribute, PrimitiveTopology};
+use bevy::render::mesh::PrimitiveTopology;
 use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::render_resource::VertexFormat;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{RenderCreation, WgpuFeatures, WgpuSettings};
-use bevy::sprite::{MaterialMesh2dBundle, Mesh2d, Mesh2dHandle, Wireframe2d, Wireframe2dColor, Wireframe2dPlugin};
 use crate::solver::{Agent, Allocation, Item};
 use crate::solver::utility::generate_indifference_curve;
 // Data structures
@@ -100,7 +89,7 @@ fn setup(
     window: Query<&mut Window>,
 ) {
     // Set up the camera with appropriate scaling
-    let mut camera = Camera2dBundle::default();
+    let camera = Camera2dBundle::default();
     commands.spawn(camera);
 
     let window = window.single();
@@ -280,11 +269,8 @@ fn draw_allocations(
     mut commands: Commands,
     mut allocations_res: ResMut<AllocationsResource>,
     mut view_bounds: ResMut<ViewBounds>,
-    asset_server: Res<AssetServer>,
-    mut materials: ResMut<Assets<ColorMaterial>>,
     mut query: Query<Entity, With<AllocationEntity>>,
     mut curve_query: Query<Entity, With<IndifferenceCurve>>,
-    mut meshes: ResMut<Assets<Mesh>>,
     ) {
     // Only run when allocations have changed
     let allocations_res: &mut AllocationsResource = allocations_res.deref_mut();
@@ -323,7 +309,6 @@ fn draw_allocations(
         
             // Draw indifference curves
             for (i, allocation) in allocations.iter().enumerate() {
-                let num_samples = 500;
                 let mut path_builder = PathBuilder::new();
     
                 let mut started = false;
@@ -346,8 +331,6 @@ fn draw_allocations(
                     v_pos.push(Vec3::new(point.x, point.y, 0.0));
                 }
                 mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, v_pos);
-                //let z = -(i as f32) - 1.0;
-                //let vertices: Vec<Vec2> = allocation.ic.iter().map(|(x, y)| Vec2::new(*x * view_bounds.sf_x, *y * view_bounds.sf_y)).collect();
 
                 let path = path_builder.build();
     
@@ -356,8 +339,7 @@ fn draw_allocations(
                 } else {
                     Color::Srgba(LINE_COL)
                 };
-    
-                let stroke = Stroke::new(color, 1.0);
+
                 commands
                     .spawn((
                         ShapeBundle {
@@ -590,7 +572,6 @@ pub fn render_test(to_allocate: Arc<Mutex<Option<Vec<RenderAllocation>>>>) {
         .insert_resource(HoveredAllocation(None))
         .insert_resource(ViewBounds { zoom: 1.0, ..Default::default() })
         .add_plugins(ShapePlugin)
-        .add_plugins(Wireframe2dPlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, handle_input)
         .add_systems(Update, draw_allocations)

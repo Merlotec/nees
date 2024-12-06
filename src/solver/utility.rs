@@ -14,11 +14,10 @@ where
 {
     let mut lower = x_min;
     let mut upper = x_max;
-    let mut mid: F = F::zero();
     let mut iter = 0;
 
     while iter < max_iter {
-        mid = (lower + upper) / F::from(2.0).unwrap();
+        let mid = (lower + upper) / F::from(2.0).unwrap();
         let u_mid = agent.utility(mid, quality);
         let diff = u_mid - u_0;
 
@@ -54,11 +53,10 @@ where
 {
     let mut lower = y_min;
     let mut upper = y_max;
-    let mut mid;
     let mut iter = 0;
 
     while iter < max_iter {
-        mid = (lower + upper) / F::from(2.0).unwrap();
+        let mid = (lower + upper) / F::from(2.0).unwrap();
         let u_mid = agent.utility(price, mid);
         let diff = u_mid - u_0;
 

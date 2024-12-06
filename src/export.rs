@@ -1,6 +1,6 @@
 use serde::Serialize;
 
-use crate::{solver::{Agent, Allocation, Item}, world::{House, Household}};
+use crate::{solver::{Agent, Allocation}, world::{House, Household}};
 
 #[derive(Serialize)]
 pub struct AllocationRow<F: num::Float> {

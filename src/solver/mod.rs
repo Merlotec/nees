@@ -1,10 +1,6 @@
-use std::ops::Range;
-use num::iter::RangeInclusive;
 use utility::indifferent_price;
-use crate::solver::switchbranch::AgentHolder;
 
 pub mod utility;
-pub mod switchbranch;
 pub mod fractal;
 
 pub trait Agent {
@@ -29,6 +25,7 @@ pub struct Allocation<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType 
     utility: F,
 }
 
+#[allow(dead_code)]
 impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<F, A, I> {
     pub fn new(agent: A, item: I, price: F) -> Self {
         let utility = agent.utility(price, item.quality());
@@ -124,14 +121,6 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
     }
 }
 
-pub struct Solver<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> {
-    agents: Vec<A>,
-    items: Vec<I>,
-
-    allocations: Vec<Allocation<F, A, I>>,
-}
-
-
 pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(allocations: &[Allocation<F, A, I>], epsilon: F, max_iter: usize) -> bool {
     let mut valid = true;
 
@@ -174,32 +163,6 @@ pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType
     valid
 }
 
-pub fn check_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
-    alloc: &Allocation<F, A, I>,
-    allocations: &[Allocation<F, A, I>],
-    epsilon: F,
-    max_iter: usize,
-    check_last: bool,
-) -> Option<(usize, F)> {
-    let mut u_max = F::zero();
-    let mut fav: Option<usize> = None;
-    let len = allocations.len();
-    for (l, other) in allocations.iter().enumerate() {
-        if alloc.agent().income() > other.price() + epsilon {
-            let u = alloc.agent().utility(other.price(), other.quality());
-            if u > alloc.utility() + epsilon {
-                // We have a double crossing.
-
-                if fav.is_none() || u > u_max {
-                    u_max = u;
-                    fav = Some(l)
-                }
-            }
-        }
-    }
-
-    fav.map(|x| (x, u_max))
-}
 
 pub fn favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     agent: &A,
@@ -261,28 +224,4 @@ pub fn max_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType =
     }
 
     fav_max
-}
-
-pub fn boundary_point<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
-    allocations: &[Allocation<F, AgentHolder<A>, I>],
-    quality: F,
-    epsilon: F,
-    max_iter: usize,
-) -> Option<(usize, F)> {
-    let mut p_max: F = num::zero();
-    let mut i_max: Option<usize> = None;
-    for (i, alloc) in allocations.iter().enumerate().rev() {
-        if i_max.is_none() {
-            p_max = alloc.indifferent_price(quality, epsilon, max_iter)?;
-            i_max = Some(i);
-        } else {
-            let u_other = alloc.agent().utility(p_max, quality);
-            if u_other > alloc.utility() {
-                p_max = alloc.indifferent_price(quality, epsilon, max_iter)?;
-                i_max = Some(i);
-            }
-        }
-    }
-
-    i_max.map(|i| (i, p_max))
 }

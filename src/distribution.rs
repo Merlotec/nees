@@ -19,7 +19,7 @@ where StandardNormal: Distribution<F>, Open01: Distribution<F> {
     //let school_quality_distribution = Normal::<F>::new(F::from(0.8).unwrap(), F::from(0.28).unwrap()).unwrap();
     let ability_distribution = Normal::<F>::new(F::zero(), F::one()).unwrap();
     //let aspiration_distribution = Normal::<F>::new(F::from(0.5).unwrap(), F::from(0.15).unwrap()).unwrap();
-    let aspiration_distribution = Normal::<F>::new(F::from(0.5).unwrap(), F::from(0.2).unwrap()).unwrap();
+    let aspiration_distribution = Normal::<F>::new(F::from(0.5).unwrap(), F::from(0.15).unwrap()).unwrap();
 
     let q_alpha = F::from(10.415578075512496).unwrap();
     let q_beta = F::from(5.458807204519353).unwrap();
