@@ -13,12 +13,29 @@ mod render;
 mod solver;
 mod world;
 mod export;
+mod cstats;
 
 fn main()  {
-    run::<f64>();
+    run_cstat::<f64>();
+    //run_config::<f64>()
 }
 
-fn run<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
+fn run_cstat<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
+where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F> {
+    let epsilon = F::from(1e-8).unwrap();
+    let max_iter = 400;
+    let n = 500;
+
+    cstats::run_all_cstat(n, n,
+            &FractalSettings {
+            epsilon,
+            max_iter,
+        }
+    )
+}
+
+
+fn run_config<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
 where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F> {
 
     let epsilon = F::from(1e-8).unwrap();
@@ -33,9 +50,9 @@ where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F>
         world = serde_json::from_str(s.as_str()).unwrap();
         actual_n = world.houses.len();
     } else {
-        world = distribution::create_world::<F>(n, n);
+        world = distribution::create_world::<F>(n, n, &Default::default());
         while !world.validate() {
-            world = distribution::create_world::<F>(n, n);
+            world = distribution::create_world::<F>(n, n, &Default::default());
         }
         fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
     }
@@ -55,7 +72,7 @@ where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F>
                 },
                 Some(pipe.clone()),
             )
-            .unwrap();
+                .unwrap();
         *pipe.lock().unwrap().deref_mut() = Some(
             allocations
                 .iter()

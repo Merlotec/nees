@@ -4,7 +4,34 @@ use rand_distr::{uniform::SampleUniform, Beta, Distribution, LogNormal, Normal, 
 
 use crate::world::*;
 
-pub fn create_world<F: num::Float + SampleUniform>(school_count: usize, house_count: usize) -> World<F>
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct DistributionParams<F: num::Float> {
+    pub inc_mean: F,
+    pub inc_cv: F,
+
+    pub asp_mean: F,
+    pub asp_std: F,
+
+    pub qual_loc: F,
+    pub qual_scale: F,
+}
+
+impl<F: num::Float> Default for DistributionParams<F> {
+    fn default() -> Self {
+        Self {
+            inc_mean: F::from(40000.0).unwrap(),
+            inc_cv: F::from(0.4).unwrap(),
+
+            asp_mean: F::from(0.5).unwrap(),
+            asp_std: F::from(0.1).unwrap(),
+
+            qual_loc: F::from(-0.13494908716854648).unwrap(),
+            qual_scale: F::from(1.1861854805071834).unwrap(),
+        }
+    }
+}
+
+pub fn create_world<F: num::Float + SampleUniform>(school_count: usize, house_count: usize, params: &DistributionParams<F>) -> World<F>
 where StandardNormal: Distribution<F>, Open01: Distribution<F> {
     assert_eq!(house_count % school_count, 0);
 
@@ -19,16 +46,16 @@ where StandardNormal: Distribution<F>, Open01: Distribution<F> {
     //let school_quality_distribution = Normal::<F>::new(F::from(0.8).unwrap(), F::from(0.28).unwrap()).unwrap();
     let ability_distribution = Normal::<F>::new(F::zero(), F::one()).unwrap();
     //let aspiration_distribution = Normal::<F>::new(F::from(0.5).unwrap(), F::from(0.15).unwrap()).unwrap();
-    let aspiration_distribution = Normal::<F>::new(F::from(0.5).unwrap(), F::from(0.15).unwrap()).unwrap();
+    let aspiration_distribution = Normal::<F>::new(params.asp_mean, params.asp_std).unwrap();
 
     let q_alpha = F::from(10.415578075512496).unwrap();
     let q_beta = F::from(5.458807204519353).unwrap();
-    let q_loc = F::from(-0.13494908716854648).unwrap();
-    let q_scale = F::from(1.1861854805071834).unwrap();
+    let q_loc = params.qual_loc;
+    let q_scale = params.qual_scale;
     let school_quality_distribution = Beta::<F>::new(q_alpha, q_beta).unwrap();
 
-    let mean_household_inc = F::from(40000.0).unwrap();
-    let cv = F::from(0.4).unwrap();
+    let mean_household_inc = params.inc_mean;
+    let cv = params.inc_cv;
     let variance = (cv * mean_household_inc) * (cv * mean_household_inc);
 
     let sigma_squared = ((variance / (mean_household_inc * mean_household_inc)) + F::one()).ln();
