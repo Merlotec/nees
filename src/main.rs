@@ -4,6 +4,7 @@ use serde::{de::DeserializeOwned, Serialize};
 use rand_distr::{uniform::SampleUniform, Distribution, Open01, StandardNormal};
 use render::RenderAllocation;
 use solver::verify_solution;
+use crate::distribution::DistributionParams;
 use crate::solver::fractal;
 use crate::solver::fractal::FractalSettings;
 use crate::world::World;
@@ -16,8 +17,8 @@ mod export;
 mod cstats;
 
 fn main()  {
-    run_cstat::<f64>();
-    //run_config::<f64>()
+    //run_cstat::<f64>();
+    run_config::<f64>()
 }
 
 fn run_cstat<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
@@ -42,6 +43,11 @@ where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F>
     let max_iter = 400;
     let n = 200;
     //let mut world = distribution::create_world::<f64>(100, 100);
+    let params = DistributionParams {
+        inc_mean: F::from(100.0).unwrap(),
+        asp_std: F::from(0.2).unwrap(),
+        ..Default::default()
+    };
 
     let mut actual_n = n;
 
@@ -50,9 +56,9 @@ where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F>
         world = serde_json::from_str(s.as_str()).unwrap();
         actual_n = world.houses.len();
     } else {
-        world = distribution::create_world::<F>(n, n, &Default::default());
+        world = distribution::create_world::<F>(n, n, &params);
         while !world.validate() {
-            world = distribution::create_world::<F>(n, n, &Default::default());
+            world = distribution::create_world::<F>(n, n, &params);
         }
         fs::write("config.json", serde_json::to_string_pretty(&world).unwrap()).unwrap();
     }
@@ -76,7 +82,7 @@ where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F>
         *pipe.lock().unwrap().deref_mut() = Some(
             allocations
                 .iter()
-                .map(|x| RenderAllocation::from_allocation(&x, F::from(100.0).unwrap(), epsilon, max_iter))
+                .map(|x| RenderAllocation::from_allocation(&x, F::from(1.0).unwrap(), epsilon, max_iter))
                 .collect(),
         );
         if verify_solution(&allocations, epsilon, max_iter) {
