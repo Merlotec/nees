@@ -3,22 +3,22 @@ use utility::indifferent_price;
 pub mod utility;
 pub mod fractal;
 
-pub trait Agent {
+pub trait Agent<const D: usize> {
     type FloatType: num::Float;
 
     fn agent_id(&self) -> usize;
     fn income(&self) -> Self::FloatType;
-    fn utility(&self, price: Self::FloatType, quality: Self::FloatType) -> Self::FloatType;
+    fn utility(&self, price: Self::FloatType, quality: [Self::FloatType; D]) -> Self::FloatType;
 }
 
-pub trait Item {
+pub trait Item<const D: usize> {
     type FloatType: num::Float;
 
-    fn quality(&self) -> Self::FloatType;
+    fn quality(&self) -> [Self::FloatType; D];
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Allocation<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> {
+pub struct Allocation<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>> {
     agent: A,
     item: I,
 
@@ -27,7 +27,7 @@ pub struct Allocation<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType 
 }
 
 #[allow(dead_code)]
-impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<F, A, I> {
+impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>> Allocation<D, F, A, I> {
     pub fn new(agent: A, item: I, price: F) -> Self {
         let utility = agent.utility(price, item.quality());
         Self {
@@ -55,7 +55,7 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
         &self.item
     }
 
-    pub fn quality(&self) -> F {
+    pub fn quality(&self) -> [F; D] {
         self.item.quality()
     }
 
@@ -99,7 +99,7 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
         self.utility
     }
 
-    pub fn indifferent_price(&self, quality: F, epsilon: F, max_iter: usize) -> Option<F> {
+    pub fn indifferent_price(&self, quality: [F; D], epsilon: F, max_iter: usize) -> Option<F> {
         let (x_min, x_max) = if quality > self.quality() {
             (self.price, self.agent.income())
         } else {
@@ -122,7 +122,7 @@ impl<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Allocation<
     }
 }
 
-pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(allocations: &[Allocation<F, A, I>], epsilon: F, max_iter: usize) -> bool {
+pub fn verify_solution<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>(allocations: &[Allocation<D, F, A, I>], epsilon: F, max_iter: usize) -> bool {
     let mut valid = true;
 
     for (i, allocation_i) in allocations.iter().enumerate() {
@@ -165,9 +165,9 @@ pub fn verify_solution<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType
 }
 
 
-pub fn favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
+pub fn favourite<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>(
     agent: &A,
-    allocations: &[Allocation<F, A, I>],
+    allocations: &[Allocation<D, F, A, I>],
     epsilon: F,
 ) -> Option<(usize, F)> {
     let mut u_max = F::zero();
@@ -185,8 +185,8 @@ pub fn favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
     fav.map(|x| (x, u_max))
 }
 
-pub fn min_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
-    allocations: &[Allocation<F, A, I>],
+pub fn min_favourite<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>(
+    allocations: &[Allocation<D, F, A, I>],
     range: std::ops::RangeInclusive<usize>,
     epsilon: F,
 ) -> Option<usize> {
@@ -206,8 +206,8 @@ pub fn min_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType =
     fav_min
 }
 
-pub fn max_favourite<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
-    allocations: &[Allocation<F, A, I>],
+pub fn max_favourite<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>(
+    allocations: &[Allocation<D, F, A, I>],
     range: std::ops::RangeInclusive<usize>,
     epsilon: F,
 ) -> Option<usize> {

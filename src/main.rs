@@ -15,6 +15,7 @@ mod solver;
 mod world;
 mod export;
 mod cstats;
+mod multidim;
 
 fn main()  {
     //run_cstat::<f64>();
