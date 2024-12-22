@@ -106,13 +106,18 @@ pub enum Direction {
 
 /// Represents an "envelope" of allocations subject to reallocation attempts.
 /// The envelope is defined by a range of allocations and a reference (env) point.
+/// Higher dimensional envelopes  work a little differently - we do know initially know the agent inside the envelope.
+/// We keep pulling back and checking if any subsequent agents need pulled back. If so, these are added to the envelope
+/// as part of the `nested` vec.
 #[derive(Debug)]
 pub struct Envelope<'a, const D: usize, F: num::Float, A: Agent<D, FloatType=F>, I: Item<D, FloatType=F>> {
     /// Slice of allocations forming the envelope.
     pub allocations: &'a mut [Allocation<D, F, A, I>],
     /// The location of the "envelope agent", often where a double-cross or pivot occurs.
     pub env: usize,
-    /// The location of the last agent that forms the starting point of the envelope.
+    /// The allocations in the evenlope.
+    pub nested: Vec<usize>,
+    // The source agent.
     pub src: usize,
     /// The direction in which we must resolve the envelope (up or down the index range).
     pub dir: Direction,
@@ -121,7 +126,8 @@ pub struct Envelope<'a, const D: usize, F: num::Float, A: Agent<D, FloatType=F>,
 impl<'a, const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>> Envelope<'a, D, F, A, I> {
     /// Constructs a new Envelope given a slice of allocations, an envelope point, a source point, and a direction.
     pub fn new(allocations: &'a mut [Allocation<D, F, A, I>], env: usize, src: usize, dir: Direction) -> Self {
-        Self { allocations, env, src, dir }
+        // We must build the nested agents by tracing a path from the source agent to the 
+        Self { allocations, env, src, dir, nested: Vec::new(), }
     }
 }
 
@@ -596,7 +602,7 @@ pub fn root<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D
             0
         };
 
-        let new_allocation = Allocation::new(AgentHolder::Agent(agents.remove(a)), items.remove(0), p0);
+        let new_allocation = Allocation::new(AgentHolder::Agent(agents.remove(a)), items.remove(0), p0, b);
         let i = allocations.len();
         allocations.push(new_allocation);
 
@@ -620,11 +626,13 @@ pub fn root<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D
     let mut cleaned = Vec::with_capacity(allocations.len());
     for alloc in allocations {
         let p = alloc.price();
+        let parent = alloc.parent();
         let (mut agent, item) = alloc.decompose();
         cleaned.push(Allocation::new(
             agent.take().to_option().ok_or(FractalError::EmptyAllocation)?,
             item,
             p,
+            parent,
         ));
     }
 

@@ -24,11 +24,16 @@ pub struct Allocation<const D: usize, F: num::Float, A: Agent<D, FloatType = F>,
 
     price: F,
     utility: F,
+
+    // Order of allocations are fixed based on set of items. 
+    // Thus an allocation at a certain index will always be the same item.
+    // Null if not aligned to another allocation (i.e. if we are the first agent).
+    parent: Option<usize>,
 }
 
 #[allow(dead_code)]
 impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>> Allocation<D, F, A, I> {
-    pub fn new(agent: A, item: I, price: F) -> Self {
+    pub fn new(agent: A, item: I, price: F, parent: Option<usize>) -> Self {
         let utility = agent.utility(price, item.quality());
         Self {
             agent,
@@ -36,11 +41,17 @@ impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, Float
 
             price,
             utility,
+
+            parent,
         }
     }
 
     pub fn decompose(self) -> (A, I) {
         (self.agent, self.item)
+    }
+
+    pub fn parent(&self) -> Option<usize> {
+        self.parent
     }
 
     pub fn agent(&self) -> &A {
