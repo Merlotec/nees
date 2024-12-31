@@ -28,18 +28,18 @@ def plot_curves(prefix):
 
         # Extract the index from the file name
         index = file.split('_')[-1].split('.')[0]
-        label = f"{prefix}_{index}"
+        label = f"GSP {index}"
 
         # Scatter plot for original data
         plt.scatter(data['quality'], data['price'], label=f"Data: {label}", alpha=0.5, s=10)
 
         # Fitted monotonic curve
-        plt.plot(quality, price, label=f"Monotonic: {label}")
+        plt.plot(quality, price, label=f"Curve fit: {label}")
 
     # Add labels, legend, and title
     plt.xlabel('Quality')
     plt.ylabel('Price')
-    plt.title(f'Monotonic Curves for {prefix}')
+    plt.title('')
     plt.legend()
     plt.grid(True)
 
@@ -48,7 +48,7 @@ def plot_curves(prefix):
     plt.savefig(output_file, format='svg')
     plt.show()
 
-root = 'ces/'
+root = 'as/'
 
 plot_curves(root + 'rep')
 plot_curves(root + 'inc_mean')
