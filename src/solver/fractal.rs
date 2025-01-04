@@ -145,7 +145,7 @@ impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
     /// is returned.
     pub fn align(&mut self, settings: &FractalSettings<F>) -> FractalResult<()> {
         match self.dir {
-            Direction::Down => {
+            Direction::Up => {
                 let start = self.src;
                 let mut i = start;
                 while i > self.env {
@@ -177,7 +177,7 @@ impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
                     }
                 }
             }
-            Direction::Up => {
+            Direction::Down => {
                 let start = self.src;
                 let mut i = start;
                 while i < self.env {
@@ -532,7 +532,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             if b < i && dir == Direction::Up {
                 // Attempt resolving by promoting the agent at b.
                 let promote = {
-                    let mut envelope = Envelope::new(allocations, b, i, Direction::Down);
+                    let mut envelope = Envelope::new(allocations, b, i, Direction::Up);
                     match envelope.align(settings) {
                         Ok(_) => false,
                         Err(FractalError::EnvelopeBreach) => true,
@@ -554,7 +554,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             } else if i < b && dir == Direction::Down {
                 // Attempt resolving by demoting the agent at b.
                 let demote = {
-                    let mut envelope = Envelope::new(allocations, b, i, Direction::Up);
+                    let mut envelope = Envelope::new(allocations, b, i, Direction::Down);
                     match envelope.align(settings) {
                         Ok(_) => false,
                         Err(FractalError::EnvelopeBreach) => true,

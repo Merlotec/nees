@@ -1,5 +1,4 @@
 use std::fmt::Write as _;
-use std::sync::{Arc, Mutex};
 
 use crate::render::RenderAllocation;
 

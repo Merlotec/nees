@@ -9,7 +9,6 @@ use crate::distribution::DistributionParams;
 use crate::solver::fractal;
 use crate::solver::fractal::FractalSettings;
 use crate::world::World;
-use bevy::scene::ron::de;
 use rand_distr::{uniform::SampleUniform, Distribution, Open01, StandardNormal};
 use render::RenderAllocation;
 use serde::{de::DeserializeOwned, Serialize};
