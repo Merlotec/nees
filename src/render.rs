@@ -1,14 +1,14 @@
+use crate::solver::utility::generate_indifference_curve;
+use crate::solver::{Agent, Allocation, Item};
+use bevy::input::mouse::MouseWheel;
 use bevy::prelude::*;
+use bevy::render::mesh::PrimitiveTopology;
+use bevy::render::render_asset::RenderAssetUsages;
+use bevy::render::settings::{RenderCreation, WgpuFeatures, WgpuSettings};
+use bevy::render::RenderPlugin;
 use bevy_prototype_lyon::prelude::*;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
-use bevy::input::mouse::MouseWheel;
-use bevy::render::mesh::PrimitiveTopology;
-use bevy::render::render_asset::RenderAssetUsages;
-use bevy::render::RenderPlugin;
-use bevy::render::settings::{RenderCreation, WgpuFeatures, WgpuSettings};
-use crate::solver::{Agent, Allocation, Item};
-use crate::solver::utility::generate_indifference_curve;
 // Data structures
 
 const CIRCLE_RAD: f32 = 3.0;
@@ -17,14 +17,17 @@ const CIRCLE_COL: Srgba = Srgba::new(0.6, 0.6, 1.0, 1.0);
 const CIRCLE_SEL_COL: Srgba = Srgba::new(1.0, 0.65, 0.01, 1.0);
 const LINE_COL: Srgba = Srgba::new(0.45, 0.4, 0.4, 1.0);
 const LINE_SEL_COL: Srgba = Srgba::new(0.9, 0.6, 0.6, 1.0);
+const BG_COL: Srgba = Srgba::WHITE;
+
+const LINE_WIDTH: f32 = 2.5;
 
 #[derive(Clone)]
 pub struct RenderAllocation {
-    ic: Vec<(f32, f32)>,
-    quality: f32,
-    price: f32,
-    utility: f32,
-    agent_id: usize,
+    pub ic: Vec<(f32, f32)>,
+    pub quality: f32,
+    pub price: f32,
+    pub utility: f32,
+    pub agent_id: usize,
 }
 
 impl RenderAllocation {
@@ -32,9 +35,22 @@ impl RenderAllocation {
         self.quality
     }
 
-    pub fn from_allocation<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(allocation: &Allocation<F, A, I>, delta: F, epsilon: F, max_iter: usize) -> Self {
+    pub fn from_allocation<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
+        allocation: &Allocation<F, A, I>,
+        delta: F,
+        epsilon: F,
+        max_iter: usize,
+    ) -> Self {
         Self {
-            ic: generate_indifference_curve(allocation.agent(), allocation.utility(), F::zero(), allocation.agent().income() - epsilon, delta, epsilon, max_iter),
+            ic: generate_indifference_curve(
+                allocation.agent(),
+                allocation.utility(),
+                F::zero(),
+                allocation.agent().income() - epsilon,
+                delta,
+                epsilon,
+                max_iter,
+            ),
             quality: allocation.quality().to_f32().unwrap(),
             price: allocation.price().to_f32().unwrap(),
             utility: allocation.utility().to_f32().unwrap(),
@@ -51,7 +67,6 @@ struct AllocationsResource {
     allocations: Vec<RenderAllocation>,
     current_idx: usize,
 }
-
 
 #[derive(Default, Resource)]
 struct HoveredAllocation(Option<usize>);
@@ -83,107 +98,93 @@ struct IndifferenceCurve {
 
 // Systems
 
-fn setup(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    window: Query<&mut Window>,
-) {
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>, window: Query<&mut Window>) {
     // Set up the camera with appropriate scaling
     let camera = Camera2dBundle::default();
     commands.spawn(camera);
 
     let window = window.single();
 
-     // Draw X and Y axes
-     let axis_color = Color::srgb(0.5, 0.5, 0.5);
-     let axis_thickness = 2.0;
- 
-     // X-axis
-     let x_axis = shapes::Line(
-         Vec2::new(0.0, 0.0),
-         Vec2::new(100000.0, 0.0),
-     );
- 
-     commands.spawn((
-         ShapeBundle {
-             path: GeometryBuilder::build_as(
-                 &x_axis,
-             ),
+    // Draw X and Y axes
+    let axis_color = Color::srgb(0.5, 0.5, 0.5);
+    let axis_thickness = 2.0;
+
+    // X-axis
+    let x_axis = shapes::Line(Vec2::new(0.0, 0.0), Vec2::new(100000.0, 0.0));
+
+    commands.spawn((
+        ShapeBundle {
+            path: GeometryBuilder::build_as(&x_axis),
             spatial: SpatialBundle {
                 transform: Transform::from_xyz(0.0, 0.0, -100.0),
                 ..Default::default()
             },
-             ..default()
-         },
-         Stroke::new(axis_color, axis_thickness),
-     ));
- 
-     // Y-axis
-     let y_axis = shapes::Line(
-         Vec2::new(0.0, 0.0),
-         Vec2::new(0.0, 100000.0),
-     );
- 
-     commands.spawn((
-         ShapeBundle {
-             path: GeometryBuilder::build_as(
-                 &y_axis,
-             ),
-             spatial: SpatialBundle {
+            ..default()
+        },
+        Stroke::new(axis_color, axis_thickness),
+    ));
+
+    // Y-axis
+    let y_axis = shapes::Line(Vec2::new(0.0, 0.0), Vec2::new(0.0, 100000.0));
+
+    commands.spawn((
+        ShapeBundle {
+            path: GeometryBuilder::build_as(&y_axis),
+            spatial: SpatialBundle {
                 transform: Transform::from_xyz(0.0, 0.0, -100.0),
                 ..Default::default()
             },
-             ..default()
-         },
-         Stroke::new(axis_color, axis_thickness),
-     ));
- 
-     // Add axis labels
-     let font = asset_server.load("fonts/Arial.ttf");
-     let label_font_size = 14.0;
-     let label_color = Color::srgb(0.5, 0.5, 0.5);
- 
-     // Determine sensible intervals for labels
-     let x_interval = 100.0;
-     let y_interval = 100.0;
- 
-     // X-axis labels
-     let mut x = 0.0;
-     while x <= window.width() {
-         let label = format!("{:.0}", x);
-         commands.spawn(Text2dBundle {
-             text: Text::from_section(
-                 label,
-                 TextStyle {
-                     font: font.clone(),
-                     font_size: label_font_size,
-                     color: label_color,
-                 },
-             ),
-             transform: Transform::from_xyz(x, -20.0, 1.0),
-             ..default()
-         });
-         x += x_interval;
-     }
- 
-     // Y-axis labels
-     let mut y = 0.0;
-     while y <= window.height() {
-         let label = format!("{:.0}", y);
-         commands.spawn(Text2dBundle {
-             text: Text::from_section(
-                 label,
-                 TextStyle {
-                     font: font.clone(),
-                     font_size: label_font_size,
-                     color: label_color,
-                 },
-             ),
-             transform: Transform::from_xyz(-30.0, y, 1.0),
-             ..default()
-         });
-         y += y_interval;
-     }
+            ..default()
+        },
+        Stroke::new(axis_color, axis_thickness),
+    ));
+
+    // Add axis labels
+    let font = asset_server.load("fonts/Arial.ttf");
+    let label_font_size = 14.0;
+    let label_color = Color::srgb(0.5, 0.5, 0.5);
+
+    // Determine sensible intervals for labels
+    let x_interval = 100.0;
+    let y_interval = 100.0;
+
+    // X-axis labels
+    let mut x = 0.0;
+    while x <= window.width() {
+        let label = format!("{:.0}", x);
+        commands.spawn(Text2dBundle {
+            text: Text::from_section(
+                label,
+                TextStyle {
+                    font: font.clone(),
+                    font_size: label_font_size,
+                    color: label_color,
+                },
+            ),
+            transform: Transform::from_xyz(x, -20.0, 1.0),
+            ..default()
+        });
+        x += x_interval;
+    }
+
+    // Y-axis labels
+    let mut y = 0.0;
+    while y <= window.height() {
+        let label = format!("{:.0}", y);
+        commands.spawn(Text2dBundle {
+            text: Text::from_section(
+                label,
+                TextStyle {
+                    font: font.clone(),
+                    font_size: label_font_size,
+                    color: label_color,
+                },
+            ),
+            transform: Transform::from_xyz(-30.0, y, 1.0),
+            ..default()
+        });
+        y += y_interval;
+    }
 }
 
 fn compute_bounds(allocations: &Vec<RenderAllocation>) -> (f32, f32, f32, f32) {
@@ -192,7 +193,6 @@ fn compute_bounds(allocations: &Vec<RenderAllocation>) -> (f32, f32, f32, f32) {
 
     let mut y_min = allocations[0].price;
     let mut y_max = allocations[0].price;
-
 
     for a in allocations {
         let x = a.quality();
@@ -257,10 +257,10 @@ fn handle_input(
                 let scale = camera_transform.scale;
                 let scaled_delta = delta.extend(0.0) * scale;
 
-                camera_transform.translation -= Vec3::new(scaled_delta.x, -scaled_delta.y, scaled_delta.z);
+                camera_transform.translation -=
+                    Vec3::new(scaled_delta.x, -scaled_delta.y, scaled_delta.z);
             }
         }
-
     }
 }
 
@@ -271,12 +271,10 @@ fn draw_allocations(
     mut view_bounds: ResMut<ViewBounds>,
     mut query: Query<Entity, With<AllocationEntity>>,
     mut curve_query: Query<Entity, With<IndifferenceCurve>>,
-    ) {
+) {
     // Only run when allocations have changed
     let allocations_res: &mut AllocationsResource = allocations_res.deref_mut();
     if let Ok(mut allocations_guard) = allocations_res.to_allocate.try_lock() {
-
-        
         if let Some(new_allocations) = allocations_guard.take() {
             allocations_res.allocations = new_allocations;
 
@@ -284,33 +282,33 @@ fn draw_allocations(
             for entity in query.iter_mut() {
                 commands.entity(entity).despawn_recursive();
             }
-    
+
             // Clear previous indifference curves
             for entity in curve_query.iter_mut() {
                 commands.entity(entity).despawn_recursive();
             }
-    
+
             let allocations = &allocations_res.allocations;
             let current_idx = allocations_res.current_idx;
-    
+
             if allocations.is_empty() {
                 return;
             }
-    
+
             // Compute coordinate bounds
             let (x_min, x_max, y_min, y_max) = compute_bounds(allocations);
             view_bounds.x_min = x_min;
             view_bounds.x_max = x_max;
             view_bounds.y_min = y_min;
             view_bounds.y_max = y_max;
-    
+
             view_bounds.sf_x = 500f32 / (x_max - x_min);
             view_bounds.sf_y = 500f32 / (y_max - y_min);
-        
+
             // Draw indifference curves
             for (i, allocation) in allocations.iter().enumerate() {
                 let mut path_builder = PathBuilder::new();
-    
+
                 let mut started = false;
 
                 let mut mesh = Mesh::new(
@@ -333,7 +331,7 @@ fn draw_allocations(
                 mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, v_pos);
 
                 let path = path_builder.build();
-    
+
                 let color = if i == current_idx {
                     Color::Srgba(Srgba::GREEN)
                 } else {
@@ -345,12 +343,16 @@ fn draw_allocations(
                         ShapeBundle {
                             path,
                             spatial: SpatialBundle {
-                                transform: Transform::from_xyz(0., 0., -(i as f32 / allocations.len() as f32) - 1.0),
+                                transform: Transform::from_xyz(
+                                    0.,
+                                    0.,
+                                    -(i as f32 / allocations.len() as f32) - 1.0,
+                                ),
                                 ..Default::default()
                             },
                             ..default()
                         },
-                        Stroke::new(color, 1.0),
+                        Stroke::new(color, LINE_WIDTH),
                     ))
                     .insert(IndifferenceCurve { index: i });
                 // commands.spawn((
@@ -365,36 +367,38 @@ fn draw_allocations(
                 //     // If not set, this will use the color in `WireframeConfig`
                 //     Wireframe2dColor { color: color.into() },
                 // ));
-
             }
-    
+
             // Draw allocation circles
             for (i, allocation) in allocations.iter().enumerate() {
                 let x = allocation.quality() * view_bounds.sf_x;
                 let y = allocation.price * view_bounds.sf_y;
-        
+
                 let circle_radius = CIRCLE_RAD; // Adjust circle size
-    
+
                 let color = if i == current_idx {
                     Color::Srgba(CIRCLE_CUR_COL)
                 } else {
                     Color::Srgba(CIRCLE_COL)
                 };
-    
+
                 let circle = shapes::Circle {
                     radius: circle_radius,
                     ..Default::default()
                 };
-    
-    
+
                 //let mesh = Mesh2dHandle(meshes.add(circle));
-    
+
                 commands
                     .spawn((
                         ShapeBundle {
                             path: GeometryBuilder::new().add(&circle).build(),
                             spatial: SpatialBundle {
-                                transform: Transform::from_xyz(x, y, (i as f32) / allocations.len() as f32),
+                                transform: Transform::from_xyz(
+                                    x,
+                                    y,
+                                    (i as f32) / allocations.len() as f32,
+                                ),
                                 ..Default::default()
                             },
                             ..default()
@@ -406,15 +410,9 @@ fn draw_allocations(
             }
         }
     }
-    
 }
 
-fn window_to_world(
-    position: Vec2,
-    window: &Window,
-    camera: &Transform,
-) -> Vec3 {
-
+fn window_to_world(position: Vec2, window: &Window, camera: &Transform) -> Vec3 {
     // Center in screen space
     let norm = Vec3::new(
         position.x - window.width() / 2.,
@@ -437,7 +435,10 @@ fn handle_hovering(
     view_bounds: Res<ViewBounds>,
     mut hovered_allocation: ResMut<HoveredAllocation>,
     mut allocation_query: Query<(&AllocationEntity, &mut Fill), Without<IndifferenceCurve>>,
-    mut curve_query: Query<(&IndifferenceCurve, &mut Stroke, &mut Transform), (Without<AllocationEntity>, Without<Camera>)>,
+    mut curve_query: Query<
+        (&IndifferenceCurve, &mut Stroke, &mut Transform),
+        (Without<AllocationEntity>, Without<Camera>),
+    >,
     mut commands: Commands,
     asset_server: Res<AssetServer>,
 ) {
@@ -452,12 +453,12 @@ fn handle_hovering(
     for (entity, mut fill, mut transform) in curve_query.iter_mut() {
         fill.color = Color::Srgba(LINE_COL);
         if allocations_res.allocations.len() > 0 {
-            transform.translation.z = -(entity.index as f32 / allocations_res.allocations.len() as f32) - 1.0;
+            transform.translation.z =
+                -(entity.index as f32 / allocations_res.allocations.len() as f32) - 1.0;
         }
     }
 
     if let Ok(window) = window.get_single() {
-
         // Handle hover detection
         if let Some(cursor_position) = window.cursor_position() {
             // Convert cursor position to world coordinates
@@ -471,11 +472,12 @@ fn handle_hovering(
                 let x = allocation.quality() * view_bounds.sf_x;
                 let y = allocation.price * view_bounds.sf_y;
 
-                let circle_radius = CIRCLE_RAD;// * camera_transform.scale.x.abs(); // Adjust circle size according to zoom
+                let circle_radius = CIRCLE_RAD; // * camera_transform.scale.x.abs(); // Adjust circle size according to zoom
 
-                let distance = ((world_position.x - x).powi(2) + (world_position.y - y).powi(2)).sqrt();
+                let distance =
+                    ((world_position.x - x).powi(2) + (world_position.y - y).powi(2)).sqrt();
                 //println!("Dist: {}, {}, {}, {}", x, y, world_position.x, world_position.y);
-                
+
                 if distance <= circle_radius * view_bounds.zoom {
                     hovered_idx = Some(allocation_entity.index);
 
@@ -498,7 +500,6 @@ fn handle_hovering(
 
             // Display info text if hovering over an allocation
             if let Some(hovered_idx) = hovered_allocation.0 {
-                
                 let allocation = &allocations[hovered_idx];
 
                 let info_text = format!(
@@ -537,10 +538,7 @@ fn handle_hovering(
 }
 
 // System to clear info texts each frame
-fn clear_info_texts(
-    mut commands: Commands,
-    query: Query<Entity, With<Text>>,
-) {
+fn clear_info_texts(mut commands: Commands, query: Query<Entity, With<Text>>) {
     for entity in query.iter() {
         commands.entity(entity).despawn();
     }
@@ -550,27 +548,35 @@ fn clear_info_texts(
 
 pub fn render_test(to_allocate: Arc<Mutex<Option<Vec<RenderAllocation>>>>) {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "NEES".into(),
-                ..default()
-            }),
-            ..default()
-        }).set(RenderPlugin {
-            render_creation: RenderCreation::Automatic(WgpuSettings {
-                // WARN this is a native only feature. It will not work with webgl or webgpu
-                features: WgpuFeatures::POLYGON_MODE_LINE,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "NEES".into(),
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(WgpuSettings {
+                        // WARN this is a native only feature. It will not work with webgl or webgpu
+                        features: WgpuFeatures::POLYGON_MODE_LINE,
+                        ..default()
+                    }),
+                    ..default()
+                }),
+        )
         .insert_resource(AllocationsResource {
             to_allocate,
             allocations: Vec::new(),
             current_idx: 0,
         })
         .insert_resource(HoveredAllocation(None))
-        .insert_resource(ViewBounds { zoom: 1.0, ..Default::default() })
+        .insert_resource(ViewBounds {
+            zoom: 1.0,
+            ..Default::default()
+        })
+        .insert_resource(ClearColor(BG_COL.into()))
         .add_plugins(ShapePlugin)
         .add_systems(Startup, setup)
         .add_systems(Update, handle_input)

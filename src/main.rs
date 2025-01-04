@@ -1,48 +1,56 @@
-use std::{fs, ops::DerefMut, sync::{Arc, Mutex}, time::Duration};
+use std::{
+    fs,
+    ops::DerefMut,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
-use serde::{de::DeserializeOwned, Serialize};
-use rand_distr::{uniform::SampleUniform, Distribution, Open01, StandardNormal};
-use render::RenderAllocation;
-use solver::verify_solution;
 use crate::distribution::DistributionParams;
 use crate::solver::fractal;
 use crate::solver::fractal::FractalSettings;
 use crate::world::World;
+use bevy::scene::ron::de;
+use rand_distr::{uniform::SampleUniform, Distribution, Open01, StandardNormal};
+use render::RenderAllocation;
+use serde::{de::DeserializeOwned, Serialize};
+use solver::verify_solution;
 
+mod cstats;
 mod distribution;
+mod export;
+mod multidim;
 mod render;
 mod solver;
+mod vectorrender;
 mod world;
-mod export;
-mod cstats;
-mod multidim;
 
-fn main()  {
+fn main() {
     //run_cstat::<f64>();
     run_config::<f64>()
 }
 
 fn run_cstat<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
-where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F> {
+where
+    F: SampleUniform,
+    StandardNormal: Distribution<F>,
+    Open01: Distribution<F>,
+{
     let epsilon = F::from(1e-8).unwrap();
     let max_iter = 400;
     let n = 500;
 
-    cstats::run_all_cstat(n, n,
-            &FractalSettings {
-            epsilon,
-            max_iter,
-        }
-    )
+    cstats::run_all_cstat(n, n, &FractalSettings { epsilon, max_iter })
 }
 
-
 fn run_config<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
-where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F> {
-
+where
+    F: SampleUniform,
+    StandardNormal: Distribution<F>,
+    Open01: Distribution<F>,
+{
     let epsilon = F::from(1e-8).unwrap();
     let max_iter = 400;
-    let n = 200;
+    let n = 10;
     //let mut world = distribution::create_world::<f64>(100, 100);
     let params = DistributionParams {
         inc_mean: F::from(100.0).unwrap(),
@@ -69,32 +77,45 @@ where F: SampleUniform, StandardNormal: Distribution<F>, Open01: Distribution<F>
 
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_secs(5));
-        let allocations =
-            fractal::root(
-                world.households,
-                world.houses,
-                FractalSettings {
-                    epsilon,
-                    max_iter,
-                },
-                Some(pipe.clone()),
-            )
-                .unwrap();
-        *pipe.lock().unwrap().deref_mut() = Some(
-            allocations
-                .iter()
-                .map(|x| RenderAllocation::from_allocation(&x, F::from(1.0).unwrap(), epsilon, max_iter))
-                .collect(),
-        );
+        let allocations = fractal::root(
+            world.households,
+            world.houses,
+            F::zero(),
+            FractalSettings { epsilon, max_iter },
+            Some(pipe.clone()),
+        )
+        .unwrap();
+
+        let ra: Vec<RenderAllocation> = allocations
+            .iter()
+            .map(|x| {
+                RenderAllocation::from_allocation(&x, F::from(1.0).unwrap(), epsilon, max_iter)
+            })
+            .collect();
+
+        let svg = vectorrender::render_allocations_to_svg(&ra, None, 1000, 1000, false);
+        std::fs::write("render.svg", svg).unwrap();
+
+        println!("Rendered allocation");
+        *pipe.lock().unwrap().deref_mut() = Some(ra);
+
         if verify_solution(&allocations, epsilon, max_iter) {
-            println!("VERIFICATION SUCCESSFUL (n={}, epsilon={})", actual_n, epsilon.to_f64().unwrap());
+            println!(
+                "VERIFICATION SUCCESSFUL (n={}, epsilon={})",
+                actual_n,
+                epsilon.to_f64().unwrap()
+            );
             if let Err(e) = export::serialize_allocations_to_csv(allocations, "sln.csv") {
                 println!("Failed to write solution to output sln.csv: {}", e);
             } else {
                 println!("Written solution to sln.csv");
             }
         } else {
-            println!("VERIFICATION FAILED (n={}, epsilon={})", actual_n, epsilon.to_f64().unwrap());
+            println!(
+                "VERIFICATION FAILED (n={}, epsilon={})",
+                actual_n,
+                epsilon.to_f64().unwrap()
+            );
         }
     });
 

@@ -107,7 +107,7 @@ pub enum Direction {
 /// Represents an "envelope" of allocations subject to reallocation attempts.
 /// The envelope is defined by a range of allocations and a reference (env) point.
 #[derive(Debug)]
-pub struct Envelope<'a, F: num::Float, A: Agent<FloatType=F>, I: Item<FloatType=F>> {
+pub struct Envelope<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> {
     /// Slice of allocations forming the envelope.
     pub allocations: &'a mut [Allocation<F, A, I>],
     /// The location of the "envelope agent", often where a double-cross or pivot occurs.
@@ -120,12 +120,24 @@ pub struct Envelope<'a, F: num::Float, A: Agent<FloatType=F>, I: Item<FloatType=
 
 impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Envelope<'a, F, A, I> {
     /// Constructs a new Envelope given a slice of allocations, an envelope point, a source point, and a direction.
-    pub fn new(allocations: &'a mut [Allocation<F, A, I>], env: usize, src: usize, dir: Direction) -> Self {
-        Self { allocations, env, src, dir }
+    pub fn new(
+        allocations: &'a mut [Allocation<F, A, I>],
+        env: usize,
+        src: usize,
+        dir: Direction,
+    ) -> Self {
+        Self {
+            allocations,
+            env,
+            src,
+            dir,
+        }
     }
 }
 
-impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Envelope<'a, F, AgentHolder<A>, I> {
+impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>
+    Envelope<'a, F, AgentHolder<A>, I>
+{
     /// Attempts to align the envelope so that a valid non-envy allocation is restored.
     ///
     /// This function assumes that removing the endpoint allocation `src` would result in a valid solution,
@@ -140,7 +152,9 @@ impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Envelop
                     match try_align_down(self.allocations, start, i, settings) {
                         Ok(_) => {
                             // Check if the current state remains valid or needs further adjustments.
-                            if let Some(fav) = min_favourite(self.allocations, i..=start, settings.epsilon) {
+                            if let Some(fav) =
+                                min_favourite(self.allocations, i..=start, settings.epsilon)
+                            {
                                 if fav <= self.env {
                                     // Allocation preferences breached, cannot maintain a valid envelope.
                                     return Err(FractalError::EnvelopeBreach);
@@ -156,7 +170,9 @@ impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Envelop
                                 return Ok(());
                             }
                         }
-                        Err(FractalError::IncomeExceeded(_)) => return Err(FractalError::EnvelopeBreach),
+                        Err(FractalError::IncomeExceeded(_)) => {
+                            return Err(FractalError::EnvelopeBreach)
+                        }
                         Err(e) => return Err(e),
                     }
                 }
@@ -168,7 +184,9 @@ impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Envelop
                     match try_align_up(self.allocations, start, i, settings) {
                         Ok(_) => {
                             // Check if the current state remains valid or needs further adjustments.
-                            if let Some(fav) = max_favourite(self.allocations, i..=start, settings.epsilon) {
+                            if let Some(fav) =
+                                max_favourite(self.allocations, i..=start, settings.epsilon)
+                            {
                                 if fav >= self.env {
                                     return Err(FractalError::EnvelopeBreach);
                                 } else if fav > i {
@@ -181,7 +199,9 @@ impl<'a, F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>> Envelop
                                 return Ok(());
                             }
                         }
-                        Err(FractalError::IncomeExceeded(_)) => return Err(FractalError::EnvelopeBreach),
+                        Err(FractalError::IncomeExceeded(_)) => {
+                            return Err(FractalError::EnvelopeBreach)
+                        }
                         Err(e) => return Err(e),
                     }
                 }
@@ -247,7 +267,8 @@ pub fn next_agent_up<F: num::Float, A: Agent<FloatType = F>>(
             agent.income(),
             settings.epsilon,
             settings.max_iter,
-        ).ok_or(FractalError::NoIndifference)?;
+        )
+        .ok_or(FractalError::NoIndifference)?;
 
         if to_allocate.is_none() || p_indif < p_min {
             p_min = p_indif;
@@ -255,7 +276,9 @@ pub fn next_agent_up<F: num::Float, A: Agent<FloatType = F>>(
         }
     }
 
-    to_allocate.map(|x| (x, p_min)).ok_or(FractalError::NoCandidate)
+    to_allocate
+        .map(|x| (x, p_min))
+        .ok_or(FractalError::NoCandidate)
 }
 
 /// Finds the agent to allocate next when moving "down" (decreasing indices) along the quality axis.
@@ -284,7 +307,8 @@ pub fn next_agent_down<F: num::Float, A: Agent<FloatType = F>>(
             p0,
             settings.epsilon,
             settings.max_iter,
-        ).ok_or(FractalError::NoIndifference)?;
+        )
+        .ok_or(FractalError::NoIndifference)?;
 
         if to_allocate.is_none() || p_indif < p_min {
             p_min = p_indif;
@@ -292,7 +316,9 @@ pub fn next_agent_down<F: num::Float, A: Agent<FloatType = F>>(
         }
     }
 
-    to_allocate.map(|x| (x, p_min)).ok_or(FractalError::NoCandidate)
+    to_allocate
+        .map(|x| (x, p_min))
+        .ok_or(FractalError::NoCandidate)
 }
 
 /// Attempts to determine a boundary point in the allocations for a given quality.
@@ -314,7 +340,8 @@ pub fn partial_boundary<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatTyp
                 // Only consider this allocation if it shows a preference that pushes the boundary further.
                 let u_other = alloc.agent().utility(p_max, quality);
                 if u_other > alloc.utility() {
-                    p_max = alloc.indifferent_price(quality, settings.epsilon, settings.max_iter)?;
+                    p_max =
+                        alloc.indifferent_price(quality, settings.epsilon, settings.max_iter)?;
                     i_max = Some(i);
                 }
             }
@@ -401,8 +428,8 @@ pub fn try_align_down<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType 
     let mut last_b = None;
     for l in (end..=start).rev() {
         let q0 = allocations[l].quality();
-        let (inner_b, p0) = partial_boundary(allocations, q0, settings)
-            .ok_or(FractalError::NoBoundary)?;
+        let (inner_b, p0) =
+            partial_boundary(allocations, q0, settings).ok_or(FractalError::NoBoundary)?;
 
         let agent = if l > end {
             // Select the next agent to move down.
@@ -452,8 +479,8 @@ fn try_align_up<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     let mut last_b = None;
     for l in start..=end {
         let q0 = allocations[l].quality();
-        let (inner_b, p0) = partial_boundary(allocations, q0, settings)
-            .ok_or(FractalError::NoBoundary)?;
+        let (inner_b, p0) =
+            partial_boundary(allocations, q0, settings).ok_or(FractalError::NoBoundary)?;
 
         let agent = if l < end {
             // Identify which agent to allocate next going upwards.
@@ -563,6 +590,7 @@ pub fn allocate<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
 pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
     mut agents: Vec<A>,
     mut items: Vec<I>,
+    constraint_price: F,
     settings: FractalSettings<F>,
     render_pipe: Option<Arc<Mutex<Option<Vec<RenderAllocation>>>>>,
 ) -> FractalResult<Vec<Allocation<F, A, I>>> {
@@ -575,11 +603,10 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         let q0 = items.first().unwrap().quality();
         let (b, p0) = if allocations.is_empty() {
             // On the first allocation, start with a zero price and no boundary.
-            (None, F::zero())
+            (None, constraint_price)
         } else {
             // Find the boundary for the next quality.
-            let (b, p1) = boundary(&allocations, q0, &settings)
-                .ok_or(FractalError::NoBoundary)?;
+            let (b, p1) = boundary(&allocations, q0, &settings).ok_or(FractalError::NoBoundary)?;
             (Some(b), p1)
         };
 
@@ -595,7 +622,8 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
             0
         };
 
-        let new_allocation = Allocation::new(AgentHolder::Agent(agents.remove(a)), items.remove(0), p0);
+        let new_allocation =
+            Allocation::new(AgentHolder::Agent(agents.remove(a)), items.remove(0), p0);
         let i = allocations.len();
         allocations.push(new_allocation);
 
@@ -605,7 +633,14 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
                 *render_pipe.lock().unwrap().deref_mut() = Some(
                     allocations
                         .iter()
-                        .map(|x| RenderAllocation::from_allocation(x, F::from(100.0).unwrap(), settings.epsilon, settings.max_iter))
+                        .map(|x| {
+                            RenderAllocation::from_allocation(
+                                x,
+                                F::from(100.0).unwrap(),
+                                settings.epsilon,
+                                settings.max_iter,
+                            )
+                        })
                         .collect(),
                 );
             }
@@ -621,7 +656,10 @@ pub fn root<F: num::Float, A: Agent<FloatType = F>, I: Item<FloatType = F>>(
         let p = alloc.price();
         let (mut agent, item) = alloc.decompose();
         cleaned.push(Allocation::new(
-            agent.take().to_option().ok_or(FractalError::EmptyAllocation)?,
+            agent
+                .take()
+                .to_option()
+                .ok_or(FractalError::EmptyAllocation)?,
             item,
             p,
         ));
