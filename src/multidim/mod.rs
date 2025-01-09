@@ -1,7 +1,8 @@
+use bevy::scene::ron::value::Float;
 use utility::indifferent_price;
 
-pub mod utility;
 pub mod fractal;
+pub mod utility;
 
 pub trait Agent<const D: usize> {
     type FloatType: num::Float;
@@ -11,29 +12,69 @@ pub trait Agent<const D: usize> {
     fn utility(&self, price: Self::FloatType, quality: [Self::FloatType; D]) -> Self::FloatType;
 }
 
+impl<A> Agent<1> for A
+where
+    A: crate::solver::Agent,
+{
+    type FloatType = <A as crate::solver::Agent>::FloatType;
+    fn agent_id(&self) -> usize {
+        <A as crate::solver::Agent>::agent_id(&self)
+    }
+
+    fn income(&self) -> Self::FloatType {
+        <A as crate::solver::Agent>::income(&self)
+    }
+    fn utility(&self, price: Self::FloatType, quality: [Self::FloatType; 1]) -> Self::FloatType {
+        <A as crate::solver::Agent>::utility(&self, price, quality[0])
+    }
+}
+
 pub trait Item<const D: usize> {
     type FloatType: num::Float;
 
     fn quality(&self) -> [Self::FloatType; D];
 }
 
+impl<I> Item<1> for I
+where
+    I: crate::solver::Item,
+{
+    type FloatType = <I as crate::solver::Item>::FloatType;
+    fn quality(&self) -> [Self::FloatType; 1] {
+        [<I as crate::solver::Item>::quality(&self)]
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Allocation<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>> {
+pub struct Allocation<
+    const D: usize,
+    F: num::Float,
+    A: Agent<D, FloatType = F>,
+    I: Item<D, FloatType = F>,
+> {
     agent: A,
     item: I,
 
     price: F,
     utility: F,
+}
 
-    // Order of allocations are fixed based on set of items. 
-    // Thus an allocation at a certain index will always be the same item.
-    // Null if not aligned to another allocation (i.e. if we are the first agent).
-    parent: Option<usize>,
+impl<
+        F: num::Float,
+        A: Agent<1, FloatType = F> + crate::solver::Agent<FloatType = F>,
+        I: Item<1, FloatType = F> + crate::solver::Item<FloatType = F>,
+    > Into<crate::solver::Allocation<F, A, I>> for Allocation<1, F, A, I>
+{
+    fn into(self) -> crate::solver::Allocation<F, A, I> {
+        crate::solver::Allocation::new(self.agent, self.item, self.price)
+    }
 }
 
 #[allow(dead_code)]
-impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>> Allocation<D, F, A, I> {
-    pub fn new(agent: A, item: I, price: F, parent: Option<usize>) -> Self {
+impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>
+    Allocation<D, F, A, I>
+{
+    pub fn new(agent: A, item: I, price: F) -> Self {
         let utility = agent.utility(price, item.quality());
         Self {
             agent,
@@ -41,17 +82,11 @@ impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, Float
 
             price,
             utility,
-
-            parent,
         }
     }
 
     pub fn decompose(self) -> (A, I) {
         (self.agent, self.item)
-    }
-
-    pub fn parent(&self) -> Option<usize> {
-        self.parent
     }
 
     pub fn agent(&self) -> &A {
@@ -93,8 +128,6 @@ impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, Float
         return agent;
     }
 
-
-
     fn set_price(&mut self, price: F) {
         assert!(price < self.agent.income());
 
@@ -111,12 +144,20 @@ impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, Float
     }
 
     pub fn indifferent_price(&self, quality: [F; D], epsilon: F, max_iter: usize) -> Option<F> {
-        let (x_min, x_max) = if quality > self.quality() {
+        let (x_min, x_max) = if self.agent().utility(self.price, quality) > self.utility() {
             (self.price, self.agent.income())
         } else {
             (F::zero(), self.price)
         };
-        indifferent_price(self.agent(), quality, self.utility, x_min, x_max, epsilon, max_iter)
+        indifferent_price(
+            self.agent(),
+            quality,
+            self.utility,
+            x_min,
+            x_max,
+            epsilon,
+            max_iter,
+        )
     }
 
     pub fn prefers(&self, other: &Self, epsilon: F) -> bool {
@@ -133,11 +174,22 @@ impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, Float
     }
 }
 
-pub fn verify_solution<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>(allocations: &[Allocation<D, F, A, I>], epsilon: F, max_iter: usize) -> bool {
+pub fn verify_solution<
+    const D: usize,
+    F: num::Float,
+    A: Agent<D, FloatType = F>,
+    I: Item<D, FloatType = F>,
+>(
+    allocations: &[Allocation<D, F, A, I>],
+    epsilon: F,
+    max_iter: usize,
+) -> bool {
     let mut valid = true;
 
     for (i, allocation_i) in allocations.iter().enumerate() {
-        let u = allocation_i.agent.utility(allocation_i.price, allocation_i.item.quality());
+        let u = allocation_i
+            .agent
+            .utility(allocation_i.price, allocation_i.item.quality());
         if (u - allocation_i.utility()).abs() > epsilon {
             println!("Agent {} has a utility mismatch!", i);
             return false;
@@ -156,9 +208,13 @@ pub fn verify_solution<const D: usize, F: num::Float, A: Agent<D, FloatType = F>
                 }
 
                 // Compute the utility agent i would get from allocation j
-                let u_alt = allocation_i.agent.utility(allocation_j.price, allocation_j.quality());
+                let u_alt = allocation_i
+                    .agent
+                    .utility(allocation_j.price, allocation_j.quality());
                 if u_alt > u + epsilon {
-                    let p_alt = allocation_i.indifferent_price(allocation_j.quality(), epsilon, max_iter).unwrap();
+                    let p_alt = allocation_i
+                        .indifferent_price(allocation_j.quality(), epsilon, max_iter)
+                        .unwrap();
                     println!(
                         "Agent {} prefers allocation {}, (delta_u = {}, delta_p = {})",
                         i,
@@ -175,8 +231,12 @@ pub fn verify_solution<const D: usize, F: num::Float, A: Agent<D, FloatType = F>
     valid
 }
 
-
-pub fn favourite<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>(
+pub fn favourite<
+    const D: usize,
+    F: num::Float,
+    A: Agent<D, FloatType = F>,
+    I: Item<D, FloatType = F>,
+>(
     agent: &A,
     allocations: &[Allocation<D, F, A, I>],
     epsilon: F,
@@ -196,7 +256,12 @@ pub fn favourite<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: I
     fav.map(|x| (x, u_max))
 }
 
-pub fn min_favourite<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>(
+pub fn min_favourite<
+    const D: usize,
+    F: num::Float,
+    A: Agent<D, FloatType = F>,
+    I: Item<D, FloatType = F>,
+>(
     allocations: &[Allocation<D, F, A, I>],
     range: std::ops::RangeInclusive<usize>,
     epsilon: F,
@@ -217,7 +282,12 @@ pub fn min_favourite<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, 
     fav_min
 }
 
-pub fn max_favourite<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, FloatType = F>>(
+pub fn max_favourite<
+    const D: usize,
+    F: num::Float,
+    A: Agent<D, FloatType = F>,
+    I: Item<D, FloatType = F>,
+>(
     allocations: &[Allocation<D, F, A, I>],
     range: std::ops::RangeInclusive<usize>,
     epsilon: F,

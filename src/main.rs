@@ -49,11 +49,11 @@ where
 {
     let epsilon = F::from(1e-8).unwrap();
     let max_iter = 400;
-    let n = 10;
-    //let mut world = distribution::create_world::<f64>(100, 100);
+    let n = 300;
+
     let params = DistributionParams {
         inc_mean: F::from(100.0).unwrap(),
-        asp_std: F::from(0.2).unwrap(),
+        asp_std: F::from(0.15).unwrap(),
         ..Default::default()
     };
 
@@ -75,15 +75,29 @@ where
     let pipe = to_allocate.clone();
 
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_secs(5));
-        let allocations = fractal::root(
+    //     std::thread::sleep(Duration::from_secs(5));
+    //     let allocations = fractal::root(
+    //         world.households,
+    //         world.houses,
+    //         F::zero(),
+    //         FractalSettings { epsilon, max_iter },
+    //         Some(pipe.clone()),
+    //     )
+    //     .unwrap();
+
+        let allocations = multidim::fractal::root(
             world.households,
             world.houses,
-            F::zero(),
-            FractalSettings { epsilon, max_iter },
-            Some(pipe.clone()),
+            multidim::fractal::FractalSettings {
+                epsilon,
+                max_iter,
+                constraint_price: F::zero(),
+            },
         )
         .unwrap();
+
+        let allocations: Vec<solver::Allocation<_, _, _>> =
+            allocations.into_iter().map(|x| x.into()).collect();
 
         let ra: Vec<RenderAllocation> = allocations
             .iter()
