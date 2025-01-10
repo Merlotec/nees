@@ -312,13 +312,13 @@ pub fn restore<
                 //let mut to_allocate = path;
                // to_allocate.insert(0, j);
                 // We want to allocate the allocatino j has moved to last.
-
+                path.reverse();
                 let mut to_allocate = path;
 
                 to_allocate.retain(|x| !cycle.contains(x));
 
                 to_allocate.push(cycle.pop().unwrap());
-                cycle.reverse();
+                //cycle.reverse();
                 to_allocate.append(&mut cycle);
                 // Add the 'rejoin' allocation as the first allocation to reallocate.
                 //to_allocate.insert(0, j);
