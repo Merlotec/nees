@@ -10,6 +10,7 @@ use std::collections::{HashSet, VecDeque};
 use std::mem;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
+use petgraph::dot::{Config, Dot};
 
 pub type AllocationGraph<
     const D: usize,
@@ -37,15 +38,17 @@ pub enum FractalError {
     NoIntermediateAgent,
     /// An allocation was found empty where an agent was expected.
     EmptyAllocation,
-    /// The envelope (a range of allocations subject to reallocation) could not be realigned to a valid state.
-    EnvelopeBreach,
+    /// An allocation would be allocated to a price below the constraint price.
+    UnconstrainedBoundary(Index),
+    /// Similar to constraint violation, but hypothetical.
+    ConstraintBreach,
 }
 
 /// A specialized result type for the fractal module.
 pub type FractalResult<T> = Result<T, FractalError>;
 
 /// Configuration parameters for fractal computations, such as tolerance and iteration limits.
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct FractalSettings<F: num::Float> {
     /// Convergence tolerance for iterative computations.
     pub epsilon: F,
@@ -157,7 +160,6 @@ pub fn next_agent_up<const D: usize, F: num::Float, A: Agent<D, FloatType = F>>(
     q1: [F; D],
     settings: &FractalSettings<F>,
 ) -> FractalResult<(usize, F)> {
-    assert!(q1 >= q0);
     let mut p_min = F::zero();
     let mut to_allocate: Option<usize> = None;
 
@@ -165,21 +167,26 @@ pub fn next_agent_up<const D: usize, F: num::Float, A: Agent<D, FloatType = F>>(
         if agent.income() <= p0 {
             return Err(FractalError::IncomeExceeded(Some(a)));
         }
-        let p_indif = indifferent_price(
+        let u = agent.utility(p0, q0);
+        if let Some(p_indif) = indifferent_price(
             agent,
             q1,
-            agent.utility(p0, q0),
-            p0,
+            u,
+            settings.constraint_price,
             agent.income(),
             settings.epsilon,
             settings.max_iter,
-        )
-        .ok_or(FractalError::NoIndifference)?;
-
-        if to_allocate.is_none() || p_indif < p_min {
-            p_min = p_indif;
-            to_allocate = Some(a);
+        ) {
+            if to_allocate.is_none() || p_indif < p_min {
+                p_min = p_indif;
+                to_allocate = Some(a);
+            }
         }
+        // } else {
+        //     if agent.utility(settings.constraint_price, q1) < u {
+        //         return Err(FractalError::ConstraintBreach);
+        //     }
+        // }
     }
 
     to_allocate
@@ -220,7 +227,7 @@ pub fn partial_boundary<
         let alloc = &graph[i];
         if i_max.is_none() {
             if let Some(p) = alloc
-                .indifferent_price(quality, settings.epsilon, settings.max_iter) {
+                .indifferent_price(quality, settings) {
                 i_max = Some(i);
                 p_max = p;
             } else {
@@ -230,7 +237,7 @@ pub fn partial_boundary<
             let u_other = alloc.agent().utility(p_max, quality);
             if u_other > alloc.utility() {
                 if let Some(p) = alloc
-                    .indifferent_price(quality, settings.epsilon, settings.max_iter) {
+                    .indifferent_price(quality, settings) {
                     i_max = Some(i);
                     p_max = p;
                 } else {
@@ -243,18 +250,24 @@ pub fn partial_boundary<
     if let Some(i_max) = i_max {
         for i in null_ind {
             if graph[i].agent().utility(p_max, quality) > graph[i].utility() + settings.epsilon {
-                let x = graph[i].indifferent_price(quality, settings.epsilon, settings.max_iter);
-                println!("ubreach!: {}, {}, {:?}", p_max.to_f32().unwrap(), graph[i].agent().income().to_f32().unwrap(), x.and_then(|f|f.to_f32()));
-                return Err(FractalError::NoBoundary);
+                if graph[i].agent().utility(settings.constraint_price, quality) > graph[i].utility() {
+                    // We have a constraint violation.
+                    return Err(FractalError::NoBoundary);
+                }
             }
         }
         Ok((Some(i_max), p_max))
     } else {
         if !null_ind.is_empty() {
-            Err(FractalError::NoBoundary)
-        } else {
-            Ok((None, settings.constraint_price))
+            // Check for constraint breach.
+            for i in null_ind.iter() {
+                if graph[*i].agent().utility(settings.constraint_price, quality) > graph[*i].utility() {
+                    // We have a constraint violation.
+                    return Err(FractalError::NoBoundary);
+                }
+            }
         }
+        Ok((None, settings.constraint_price))
     }
 }
 
@@ -358,6 +371,61 @@ fn reverse_bfs_with_termination<
 
     order
 }
+/// Traverse from `start` in both directions (incoming and outgoing edges),
+/// but handle `end` specially:
+///  - Don't add `end` to the visited order.
+///  - Don't explore incoming edges of `end`.
+///  - Do explore outgoing edges of `end`.
+fn multi_dir_bfs<
+    const D: usize,
+    F: num::Float,
+    A: Agent<D, FloatType = F>,
+    I: Item<D, FloatType = F>,
+>(
+    graph: &AllocationGraph<D, F, A, I>,  // or Graph<MyNode, E>, etc.
+    start: Index,
+    end: Index,
+) -> Vec<Index> {
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    let mut order = Vec::new();
+
+    // Begin BFS from the `start` node
+    visited.insert(start);
+    queue.push_back(start);
+
+    while let Some(current) = queue.pop_front() {
+        if current == end {
+            // Skip adding `end` to the order
+            // BUT do explore forward (outgoing) edges from `end`.
+            for neighbor in graph.neighbors_directed(current, Direction::Outgoing) {
+                if visited.insert(neighbor) {
+                    queue.push_back(neighbor);
+                }
+            }
+        } else {
+            // Regular node (not `end`):
+            // 1) Add `current` to the BFS visitation order
+            order.push(current);
+
+            // 2) Explore incoming edges (backwards)
+            for neighbor in graph.neighbors_directed(current, Direction::Incoming) {
+                if visited.insert(neighbor) {
+                    queue.push_back(neighbor);
+                }
+            }
+
+            // 3) Explore outgoing edges (forwards)
+            for neighbor in graph.neighbors_directed(current, Direction::Outgoing) {
+                if visited.insert(neighbor) {
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+    }
+
+    order
+}
 
 /// Rotate the agents along the given `path` in the direction of edges,
 /// moving the last agent in the path to the first node.
@@ -413,6 +481,9 @@ pub fn restore<
 ) -> FractalResult<()> {
     // Check to see if this agent prefers any other agents.
     for j in graph.node_indices() {
+        if !graph[j].agent().active() {
+            continue;
+        }
         if graph[i].prefers(&graph[j], settings.epsilon) {
             // Check if we have a cycle in the graph, if so, we must promote.
             // Having a cycle is equivalent to an envelope breach in the 1D case.
@@ -429,7 +500,7 @@ pub fn restore<
                 rotate_agents_along_path(graph, &cycle);
 
                 // Get the allocations in order of how we want to reallocate them.
-                let mut to_allocate = reverse_bfs_with_termination(graph, i, j);
+                let mut to_allocate = multi_dir_bfs(graph, i, j);
 
                 // Start with agent j
                 graph[j].agent_mut().deactivate();
@@ -438,6 +509,9 @@ pub fn restore<
                     graph[*a].agent_mut().deactivate();
                 }
                 println!("to_allocate: {:?}", to_allocate);
+
+                std::fs::write("graph_cycle.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::NodeIndexLabel, Config::EdgeNoLabel])))
+                    .expect("Failed to write DOT file");
 
                 // Allocate j first.
                 {
@@ -460,6 +534,11 @@ pub fn restore<
                 println!("pull: {:?}, {:?}", i, j);
                 // Pull back this allocation to the boundary and allocate recursively.
                 let (b, p) = partial_boundary(graph, graph[j].quality(), settings)?;
+                if p > graph[j].agent().income() {
+                    std::fs::write("graph.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::NodeIndexLabel, Config::EdgeNoLabel])))
+                        .expect("Failed to write DOT file");
+                    panic!("boom!");
+                }
                 graph[j].set_price(p);
                 allocate(graph, j, b, settings)?;
             }
@@ -487,6 +566,7 @@ pub fn allocate<
     });
     if let Some(b) = b {
         // Add new edge.
+        assert!(graph[b].agent().active());
         graph.add_edge(b, i, ());
     }
 
@@ -564,7 +644,8 @@ pub fn root<
         allocate(&mut graph, i, b, &settings)?;
     }
 
-    println!("nodes: {}", graph.node_count());
+    std::fs::write("sln.dot", format!("{:?}", Dot::with_config(&graph, &[Config::EdgeNoLabel])))
+        .expect("Failed to write DOT file");
 
     // Final clean-up: extract the actual agents and items from `AgentHolder` and return the final solution.
     let mut cleaned = Vec::with_capacity(graph.node_count());

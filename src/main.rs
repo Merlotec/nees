@@ -25,7 +25,8 @@ mod world;
 
 fn main() {
     //run_cstat::<f64>();
-    run_config::<f64>()
+    //run_config::<f64>()
+    multidim::world::test_multidim::<2, f64>(20);
 }
 
 fn run_cstat<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
@@ -49,7 +50,7 @@ where
 {
     let epsilon = F::from(1e-8).unwrap();
     let max_iter = 400;
-    let n = 300;
+    let n = 500;
 
     let params = DistributionParams {
         inc_mean: F::from(100.0).unwrap(),

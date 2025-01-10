@@ -1,8 +1,10 @@
 use bevy::scene::ron::value::Float;
 use utility::indifferent_price;
+use crate::multidim::fractal::FractalSettings;
 
 pub mod fractal;
 pub mod utility;
+pub mod world;
 
 pub trait Agent<const D: usize> {
     type FloatType: num::Float;
@@ -45,7 +47,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Allocation<
     const D: usize,
     F: num::Float,
@@ -57,6 +59,18 @@ pub struct Allocation<
 
     price: F,
     utility: F,
+}
+
+impl<
+    const D: usize,
+    F: num::Float,
+    A: Agent<D, FloatType = F>,
+    I: Item<D, FloatType = F>,
+> std::fmt::Debug for Allocation<D, F, A, I>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Allocation: a: {}, p: {}", self.agent().agent_id(), self.price().to_f32().unwrap())
+    }
 }
 
 impl<
@@ -143,11 +157,12 @@ impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, Float
         self.utility
     }
 
-    pub fn indifferent_price(&self, quality: [F; D], epsilon: F, max_iter: usize) -> Option<F> {
+    pub fn indifferent_price(&self, quality: [F; D], settings: &FractalSettings<F>) -> Option<F> {
         let (x_min, x_max) = if self.agent().utility(self.price, quality) > self.utility() {
             (self.price, self.agent.income())
         } else {
-            (F::zero(), self.price)
+            assert!(self.price >= settings.constraint_price);
+            (settings.constraint_price, self.price)
         };
         indifferent_price(
             self.agent(),
@@ -155,8 +170,8 @@ impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, Float
             self.utility,
             x_min,
             x_max,
-            epsilon,
-            max_iter,
+            settings.epsilon,
+            settings.max_iter,
         )
     }
 
@@ -181,8 +196,7 @@ pub fn verify_solution<
     I: Item<D, FloatType = F>,
 >(
     allocations: &[Allocation<D, F, A, I>],
-    epsilon: F,
-    max_iter: usize,
+    settings: &FractalSettings<F>,
 ) -> bool {
     let mut valid = true;
 
@@ -190,7 +204,7 @@ pub fn verify_solution<
         let u = allocation_i
             .agent
             .utility(allocation_i.price, allocation_i.item.quality());
-        if (u - allocation_i.utility()).abs() > epsilon {
+        if (u - allocation_i.utility()).abs() > settings.epsilon {
             println!("Agent {} has a utility mismatch!", i);
             return false;
         }
@@ -211,9 +225,9 @@ pub fn verify_solution<
                 let u_alt = allocation_i
                     .agent
                     .utility(allocation_j.price, allocation_j.quality());
-                if u_alt > u + epsilon {
+                if u_alt > u + settings.epsilon {
                     let p_alt = allocation_i
-                        .indifferent_price(allocation_j.quality(), epsilon, max_iter)
+                        .indifferent_price(allocation_j.quality(), settings)
                         .unwrap();
                     println!(
                         "Agent {} prefers allocation {}, (delta_u = {}, delta_p = {})",
