@@ -317,7 +317,7 @@ pub fn restore<
 
                 to_allocate.retain(|x| !cycle.contains(x));
 
-                to_allocate.push(cycle.remove(0));
+                to_allocate.push(cycle.pop().unwrap());
                 cycle.reverse();
                 to_allocate.append(&mut cycle);
                 // Add the 'rejoin' allocation as the first allocation to reallocate.
