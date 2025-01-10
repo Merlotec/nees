@@ -5,6 +5,7 @@ use crate::multidim::fractal::FractalSettings;
 pub mod fractal;
 pub mod utility;
 pub mod world;
+mod graph;
 
 pub trait Agent<const D: usize> {
     type FloatType: num::Float;
@@ -67,9 +68,10 @@ impl<
     A: Agent<D, FloatType = F>,
     I: Item<D, FloatType = F>,
 > std::fmt::Debug for Allocation<D, F, A, I>
+where A: std::fmt::Debug,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Allocation: a: {}, p: {}", self.agent().agent_id(), self.price().to_f32().unwrap())
+        write!(f, "Allocation: a_id: {}, a: {:?} , p: {}", self.agent().agent_id(), self.agent(), self.price().to_f32().unwrap())
     }
 }
 

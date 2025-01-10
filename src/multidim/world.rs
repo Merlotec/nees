@@ -132,5 +132,7 @@ where StandardNormal: Distribution<F> {
 
     if super::verify_solution(&allocations, &settings) {
         println!("MULTIDIM VERIFICATION SUCCESSFUL!!!");
+    } else {
+        println!("MULTIDIM VERIFICATION FAILED :(");
     }
 }

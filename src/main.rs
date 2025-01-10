@@ -26,7 +26,7 @@ mod world;
 fn main() {
     //run_cstat::<f64>();
     //run_config::<f64>()
-    multidim::world::test_multidim::<2, f64>(20);
+    multidim::world::test_multidim::<3, f64>(70);
 }
 
 fn run_cstat<F: 'static + Send + num::Float + Serialize + DeserializeOwned>()
