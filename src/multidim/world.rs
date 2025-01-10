@@ -126,12 +126,12 @@ where StandardNormal: Distribution<F> {
     let am = F::one() / F::from(D + 1).unwrap();
     let world: DimWorld<D, F, _, _> = create_cb_world(n, std::array::from_fn(|_| Normal::new(F::from(0.5).unwrap(), F::from(0.1).unwrap()).unwrap()), std::array::from_fn(|_| Normal::new(am, am * F::from(0.1).unwrap()).unwrap()), Normal::new(F::from(100.0).unwrap(), F::from(50.0).unwrap()).unwrap());
 
-    let settings = super::fractal::FractalSettings { epsilon: F::from(1e-8).unwrap(), max_iter: 400, constraint_price: F::zero() };
+    let settings = super::allocate::FractalSettings { epsilon: F::from(1e-8).unwrap(), max_iter: 400, constraint_price: F::zero() };
 
-    let allocations = super::fractal::root(world.agents, world.items, settings).unwrap();
+    let allocations = super::allocate::root(world.agents, world.items, settings).unwrap();
 
     if super::verify_solution(&allocations, &settings) {
-        println!("MULTIDIM VERIFICATION SUCCESSFUL!!!");
+        println!("MULTIDIM VERIFICATION SUCCESSFUL!!! (n={})", n);
     } else {
         println!("MULTIDIM VERIFICATION FAILED :(");
     }

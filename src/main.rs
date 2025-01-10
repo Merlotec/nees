@@ -86,10 +86,10 @@ where
     //     )
     //     .unwrap();
 
-        let allocations = multidim::fractal::root(
+        let allocations = multidim::allocate::root(
             world.households,
             world.houses,
-            multidim::fractal::FractalSettings {
+            multidim::allocate::FractalSettings {
                 epsilon,
                 max_iter,
                 constraint_price: F::zero(),

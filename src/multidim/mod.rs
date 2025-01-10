@@ -1,8 +1,8 @@
 use bevy::scene::ron::value::Float;
 use utility::indifferent_price;
-use crate::multidim::fractal::FractalSettings;
+use crate::multidim::allocate::FractalSettings;
 
-pub mod fractal;
+pub mod allocate;
 pub mod utility;
 pub mod world;
 mod graph;

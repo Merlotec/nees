@@ -2,7 +2,7 @@ use std::collections::{HashSet, VecDeque};
 use petgraph::{Direction, Graph};
 use petgraph::graph::NodeIndex;
 use crate::multidim::{Agent, Allocation, Item};
-use crate::multidim::fractal::{AgentHolder};
+use crate::multidim::allocate::{AgentHolder};
 
 
 pub type AllocationGraph<

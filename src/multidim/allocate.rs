@@ -310,8 +310,8 @@ pub fn restore<
                 // Get the allocations in order of how we want to reallocate them.
                 let mut path = multi_dir_bfs(graph, i, j);
                 //let mut to_allocate = path;
-               // to_allocate.insert(0, j);
-                // We want to allocate the allocatino j has moved to last.
+                // to_allocate.insert(0, j);
+                // We want to allocate the allocation j has moved to last.
                 path.reverse();
                 let mut to_allocate = path;
 
@@ -324,8 +324,8 @@ pub fn restore<
                 //to_allocate.insert(0, j);
 
                 reallocate_path(graph, &to_allocate, settings)?;
-                std::fs::write("cycle.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::EdgeNoLabel])))
-                    .expect("Failed to write DOT file");
+                // std::fs::write("cycle.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::EdgeNoLabel])))
+                //     .expect("Failed to write DOT file");
             } else {
                 //println!("pull: {:?}, {:?}", i, j);
                 // Pull back this allocation to the boundary and allocate recursively.
