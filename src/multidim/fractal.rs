@@ -466,6 +466,83 @@ fn rotate_agents_along_path<
     graph[first_index].agent = last_agent;
 }
 
+
+/// Traverse backwards from `start` by following incoming edges.
+/// Stop if we find a node that satisfies `predicate`.
+/// Return the path [start -> ... -> found_node] if successful, or `None` if no match was found.
+pub fn traverse_backwards_until<
+    const D: usize,
+    F: num::Float,
+    A: Agent<D, FloatType = F>,
+    I: Item<D, FloatType = F>,
+    G
+>(
+    graph: &AllocationGraph<D, F, A, I>,
+    start: Index,
+    mut predicate: G,
+) -> Option<Vec<Index>>
+where
+// The predicate reads node data (N) and returns a bool
+    G: FnMut(&Allocation<D, F, AgentHolder<D, A>, I>) -> bool,
+{
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    // Store each node's parent to reconstruct path
+    // `parent[i] = Some(j)` means we reached i from j.
+    let mut parent = vec![None; graph.node_count()];
+
+    // Initialize BFS
+    visited.insert(start);
+    queue.push_back(start);
+
+    // If the start node itself satisfies the predicate, we can return immediately.
+    if predicate(&graph[start]) {
+        return Some(vec![start]);
+    }
+
+    // Standard BFS loop, but only along incoming edges
+    while let Some(current) = queue.pop_front() {
+        // For each predecessor of `current`
+        for neighbor in graph.neighbors_directed(current, Direction::Incoming) {
+            if !visited.contains(&neighbor) {
+                visited.insert(neighbor);
+                parent[neighbor.index()] = Some(current);
+
+                // Check the predicate
+                if predicate(&graph[neighbor]) {
+                    // Found a satisfying node, reconstruct the path and return
+                    return Some(reconstruct_path(start, neighbor, &parent));
+                }
+
+                queue.push_back(neighbor);
+            }
+        }
+    }
+
+    // No match found
+    None
+}
+
+/// Reconstruct the path from `start` to `end` using the `parent` array.
+/// Returns a Vec of node indices: [start, ..., end].
+fn reconstruct_path(
+    start: Index,
+    end: Index,
+    parent: &[Option<Index>],
+) -> Vec<Index> {
+    let mut path = vec![end];
+    let mut current = end;
+    // Walk backwards until we reach `start`
+    while current != start {
+        let p = parent[current.index()]
+            .expect("No parent found while reconstructing path. This shouldn't happen if BFS is correct.");
+        path.push(p);
+        current = p;
+    }
+    path.reverse();
+    path
+}
+
 /// The recursive allocation function that ensures no-envy conditions are maintained.
 /// It attempts to place an agent at allocation index `i`, potentially resolving double-crosses
 /// by rearranging envelopes above or below, depending on the direction.
@@ -517,8 +594,7 @@ pub fn restore<
                 {
                     let (b, p) =
                         partial_boundary(graph, graph[j].quality(), settings)?;
-                    graph[j].set_price(p);
-                    allocate(graph, j, b, settings)?;
+                    allocate(graph, j, b, p, settings)?;
                 }
 
                 while !to_allocate.is_empty() {
@@ -526,8 +602,7 @@ pub fn restore<
                     let l = *to_allocate.last().unwrap();
                     let (b, p) =
                         partial_boundary(graph, graph[l].quality(), settings)?;
-                    graph[l].set_price(p);
-                    allocate(graph, l, b, settings)?;
+                    allocate(graph, l, b, p, settings)?;
                     to_allocate.pop();
                 }
             } else {
@@ -539,8 +614,7 @@ pub fn restore<
                         .expect("Failed to write DOT file");
                     panic!("boom!");
                 }
-                graph[j].set_price(p);
-                allocate(graph, j, b, settings)?;
+                allocate(graph, j, b, p, settings)?;
             }
         }
     }
@@ -557,8 +631,16 @@ pub fn allocate<
     graph: &mut AllocationGraph<D, F, A, I>,
     i: Index,
     b: Option<Index>,
+    p: F,
     settings: &FractalSettings<F>,
 ) -> FractalResult<()> {
+
+    if p < graph[i].agent().income() {
+        graph[i].set_price(p);
+    } else {
+        panic!("Income exceeded!");
+    }
+
     // Remove old edges.
     graph.retain_edges(|g, e| {
         let (_, target) = g.edge_endpoints(e).unwrap();
@@ -641,7 +723,7 @@ pub fn root<
         // }
 
         // Recursively ensure no-envy conditions by aligning envelopes if needed.
-        allocate(&mut graph, i, b, &settings)?;
+        allocate(&mut graph, i, b, p0, &settings)?;
     }
 
     std::fs::write("sln.dot", format!("{:?}", Dot::with_config(&graph, &[Config::EdgeNoLabel])))
