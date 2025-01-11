@@ -191,7 +191,7 @@ impl<const D: usize, F: num::Float, A: Agent<D, FloatType = F>, I: Item<D, Float
     }
 }
 
-pub fn verify_solution<
+pub fn verify_non_envy_configuration<
     const D: usize,
     F: num::Float,
     A: Agent<D, FloatType = F>,

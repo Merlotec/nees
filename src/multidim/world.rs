@@ -111,7 +111,7 @@ where StandardNormal: Distribution<F> {
             if sum < F::from(0.95).unwrap() {
                 break;
             } else {
-                pref_params = pref_distributions.iter().map(|x| x.sample(&mut rng).clamp(F::from(0.1).unwrap(), F::from(0.9).unwrap())).collect::<Vec<F>>().try_into().unwrap_or_else(|_| panic!("Failed to generate random distribution"));
+                pref_params = pref_distributions.iter().map(|x| x.sample(&mut rng).clamp(F::from(0.3 / D as f64).unwrap(), F::from(0.9).unwrap())).collect::<Vec<F>>().try_into().unwrap_or_else(|_| panic!("Failed to generate random distribution"));
             }
         }
         let income = income_distribution.sample(&mut rng).max(F::from(5.0).unwrap());
@@ -128,11 +128,15 @@ where StandardNormal: Distribution<F> {
 
     let settings = super::allocate::FractalSettings { epsilon: F::from(1e-8).unwrap(), max_iter: 400, constraint_price: F::zero() };
 
-    let allocations = super::allocate::root(world.agents, world.items, settings).unwrap();
+    println!("Running algorithm (D={}, n={})", D, n);
+    let mut allocations = super::allocate::root(world.agents, world.items, settings).unwrap();
 
-    if super::verify_solution(&allocations, &settings) {
-        println!("MULTIDIM VERIFICATION SUCCESSFUL!!! (n={})", n);
+    // Test to ensure verification works - should fail with this code.
+    //allocations[0].set_price(F::from(1.0).unwrap());
+
+    if super::verify_non_envy_configuration(&allocations, &settings) {
+        println!("MULTIDIM NON-ENVY VERIFICATION SUCCESSFUL!!! (D={}, n={})", D, allocations.len());
     } else {
-        println!("MULTIDIM VERIFICATION FAILED :(");
+        println!("MULTIDIM NON-ENVY VERIFICATION FAILED :( (D={}, n={})", D, allocations.len());
     }
 }

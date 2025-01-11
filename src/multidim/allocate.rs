@@ -317,15 +317,18 @@ pub fn restore<
 
                 to_allocate.retain(|x| !cycle.contains(x));
 
-                to_allocate.push(cycle.pop().unwrap());
+                //to_allocate.push(cycle.remove(0));
                 //cycle.reverse();
+                let last = cycle.remove(0);
+                // Maintain the order of allocation according to the old order of agents along the graph.
                 to_allocate.append(&mut cycle);
                 // Add the 'rejoin' allocation as the first allocation to reallocate.
                 //to_allocate.insert(0, j);
+                to_allocate.push(last);
 
                 reallocate_path(graph, &to_allocate, settings)?;
-                // std::fs::write("cycle.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::EdgeNoLabel])))
-                //     .expect("Failed to write DOT file");
+                std::fs::write("cycle.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::EdgeNoLabel, Config::NodeIndexLabel])))
+                    .expect("Failed to write DOT file");
             } else {
                 //println!("pull: {:?}, {:?}", i, j);
                 // Pull back this allocation to the boundary and allocate recursively.
@@ -446,20 +449,30 @@ pub fn allocate<
 
         restore(graph, i, settings)?;
     } else {
+        // For some reason this is the slowest strategy but seems to always find an equilibrium.
         println!("income_exceeded: i: {:?}, b: {:?}", i, b);
         // Find the nearest allocation at which we could allocate.
         let income = graph[i].agent().income();
         let b = b.ok_or(FractalError::NoBoundary)?;
         let mut path = traverse_backwards_until(graph, b, |alloc| alloc.price() < income).ok_or(FractalError::IncomeExceeded(None))?;
         path.insert(0, i);
+        let last = *path.last().unwrap();
+        path.reverse();
         // cycle the path.
         rotate_agents_along_path(graph, &path);
-        let last = *path.last().unwrap();
-        let mut to_allocate = bfs_forward(graph, last);
-        //to_allocate.insert(0, last);
-        let mut invalid_path = bfs_forward(graph, i);
-        to_allocate.insert(0, invalid_path.remove(0));
-        to_allocate.append(&mut invalid_path);
+        // let mut to_allocate = bfs_forward(graph, last);
+        // //to_allocate.insert(0, last);
+        // let mut invalid_path = bfs_forward(graph, i);
+        // //to_allocate.insert(0, invalid_path.remove(0));
+        // to_allocate.append(&mut invalid_path);
+        //
+        let mut to_allocate = bfs_forward(graph, i);
+        to_allocate.reverse();
+        let mut backpath = bfs_forward(graph, last);
+        backpath.reverse();
+        to_allocate.append(&mut backpath);
+
+        println!("alloc: {:?}", &to_allocate);
         reallocate_path(graph, &to_allocate, settings)?;
     }
     //assert!(verify_integrity(graph, settings));
