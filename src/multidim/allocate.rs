@@ -297,12 +297,12 @@ pub fn restore<
             // Having a cycle is equivalent to an envelope breach in the 1D case.
 
             if let Some(mut cycle) = find_path_bfs(graph, j, i) {
-                println!("cycle {:?}", &cycle);
+                // println!("cycle {:?}", &cycle);
                 // Deal with a cycle.
                 // To do this we essentially move each agent to the allocation along its edge, and since we have a cycle, each agent can move.
                 // Start with the last item in the path.
                 // Must also reallocate anything that has updated.
-                // So poison nodes connected to j, then reallocate them all in the opposite order starting from i at allocation j (by cycling around).
+                // So 'poison' nodes connected to j, then reallocate them all in the opposite order starting from i at allocation j (by cycling around).
 
                 // Rotate along the path.
                 rotate_agents_along_path(graph, &cycle);
@@ -326,13 +326,19 @@ pub fn restore<
                 //to_allocate.insert(0, j);
                 to_allocate.push(last);
 
+                for a in &to_allocate {
+                    // They must currently be active.
+                    assert!(graph[*a].agent().active());
+                }
+
                 reallocate_path(graph, &to_allocate, settings)?;
-                std::fs::write("cycle.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::EdgeNoLabel, Config::NodeIndexLabel])))
-                    .expect("Failed to write DOT file");
+                // std::fs::write("cycle.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::EdgeNoLabel, Config::NodeIndexLabel])))
+                //     .expect("Failed to write DOT file");
             } else {
                 //println!("pull: {:?}, {:?}", i, j);
                 // Pull back this allocation to the boundary and allocate recursively.
                 let (b, p) = partial_boundary(graph, graph[j].quality(), settings)?;
+                assert!(graph[j].agent().active());
                 allocate(graph, j, b, p, settings)?;
             }
         }
@@ -445,12 +451,12 @@ pub fn allocate<
             graph.add_edge(b, i, ());
         }
 
+        // Ensures activation.
         graph[i].agent_mut().activate();
-
         restore(graph, i, settings)?;
     } else {
         // For some reason this is the slowest strategy but seems to always find an equilibrium.
-        println!("income_exceeded: i: {:?}, b: {:?}", i, b);
+        //println!("income_exceeded: i: {:?}, b: {:?}", i, b);
         // Find the nearest allocation at which we could allocate.
         let income = graph[i].agent().income();
         let b = b.ok_or(FractalError::NoBoundary)?;
@@ -466,13 +472,29 @@ pub fn allocate<
         // //to_allocate.insert(0, invalid_path.remove(0));
         // to_allocate.append(&mut invalid_path);
         //
+        // TODO: problem here? sometimes taking duplicates....
         let mut to_allocate = bfs_forward(graph, i);
         to_allocate.reverse();
         let mut backpath = bfs_forward(graph, last);
         backpath.reverse();
-        to_allocate.append(&mut backpath);
+        for b in backpath {
+            if !to_allocate.contains(&b) {
+                to_allocate.push(b);
+            } else {
+                // std::fs::write("weird.dot", format!("{:?}", Dot::with_config(graph as &_, &[Config::EdgeNoLabel])))
+                //     .expect("Failed to write DOT file");
+                // panic!("OOPS!");
+            }
+        }
 
-        println!("alloc: {:?}", &to_allocate);
+        for p in path {
+            to_allocate.retain(|x| *x != p);
+            to_allocate.push(p);
+        }
+
+        //to_allocate.append(&mut backpath);
+
+        //println!("alloc: {:?}", &to_allocate);
         reallocate_path(graph, &to_allocate, settings)?;
     }
     //assert!(verify_integrity(graph, settings));

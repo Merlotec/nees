@@ -1,11 +1,16 @@
 use std::cmp::Ordering;
+use std::fs;
 use rand::distributions::{Distribution, Open01, Uniform};
 use rand::distributions::uniform::SampleUniform;
 use rand_distr::{Beta, LogNormal, Normal, StandardNormal};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde::de::DeserializeOwned;
 use crate::distribution::DistributionParams;
 use crate::world::{House, Household, School, World};
 use super::{Item, Agent};
+use serde_big_array::BigArray;
+use serde_with::serde_as;
+use crate::distribution;
 
 /// Cobb-Douglas agent with D dimensions and heterogeneous parameters.
 #[derive(Debug, Clone)]
@@ -57,10 +62,53 @@ impl<const D: usize, F: num::Float> Agent<D> for CDAgent<D, F> {
 
 }
 
+
 #[derive(Debug, Clone)]
 pub struct DimItem<const D: usize, F: num::Float> {
     /// Store quality here to improve cache locality and avoid having to look up quality from school.
     pub quality: [F; D],
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DimItemRecord<const D: usize, F: num::Float + Serialize + DeserializeOwned> {
+    /// Store quality here to improve cache locality and avoid having to look up quality from school.
+    #[serde_as(as = "[_; D]")]
+    pub quality: [F; D],
+}
+
+impl<const D: usize, F: num::Float + Serialize + DeserializeOwned> From<DimItem<D, F>> for DimItemRecord<D, F> {
+    fn from(value: DimItem<D, F>) -> Self {
+        Self {quality: value.quality}
+    }
+}
+
+impl<const D: usize, F: num::Float + Serialize + DeserializeOwned> From<DimItemRecord<D, F>> for DimItem<D, F> {
+    fn from(value: DimItemRecord<D, F>) -> Self {
+        Self {quality: value.quality}
+    }
+}
+
+#[serde_as]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CDAgentRecord<const D: usize, F: num::Float + Serialize> {
+    /// Store quality here to improve cache locality and avoid having to look up quality from school.
+    pub id: usize,
+    pub income: F,
+    #[serde_as(as = "[_; D]")]
+    pub pref_params: [F; D],
+}
+
+impl<const D: usize, F: num::Float + Serialize + DeserializeOwned> From<CDAgentRecord<D, F>> for CDAgent<D, F> {
+    fn from(value: CDAgentRecord<D, F>) -> Self {
+        Self {id: value.id, income: value.income, pref_params: value.pref_params}
+    }
+}
+
+impl<const D: usize, F: num::Float + Serialize + DeserializeOwned> From<CDAgent<D, F>> for CDAgentRecord<D, F> {
+    fn from(value: CDAgent<D, F>) -> Self {
+        Self {id: value.id, income: value.income, pref_params: value.pref_params}
+    }
 }
 
 impl<const D: usize, F: num::Float> DimItem<D, F> {
@@ -82,14 +130,21 @@ impl<const D: usize, F: num::Float> Item<D> for DimItem<D, F> {
 
 
 
-#[derive(Debug, Clone)]
-pub struct DimWorld<const D: usize, F: num::Float, I: Item<D, FloatType = F>, A: Agent<D, FloatType = F>> {
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DimWorld<I, A> {
     pub items: Vec<I>,
     pub agents: Vec<A>,
 }
 
+impl<I, A> DimWorld<I, A> {
+    fn from_similar<I0, A0>(value: DimWorld<I0, A0>) -> Self
+    where A: From<A0>, I: From<I0> {
+        Self {items: value.items.into_iter().map(|x| I::from(x)).collect(), agents: value.agents.into_iter().map(|x| A::from(x)).collect()}
+    }
+}
 
-pub fn create_cb_world<const D: usize, F: num::Float + SampleUniform, Q: Distribution<F>, P: Distribution<F>, Y: Distribution<F>>(n: usize, quality_distributions: [Q; D], pref_distributions: [P; D], income_distribution: Y) -> DimWorld<D, F, DimItem<D, F>, CDAgent<D, F>>
+
+pub fn create_cb_world<const D: usize, F: num::Float + SampleUniform, Q: Distribution<F>, P: Distribution<F>, Y: Distribution<F>>(n: usize, quality_distributions: [Q; D], pref_distributions: [P; D], income_distribution: Y) -> DimWorld<DimItem<D, F>, CDAgent<D, F>>
 where StandardNormal: Distribution<F> {
 
     let mut items: Vec<DimItem<D, F>> = Vec::with_capacity(n);
@@ -121,12 +176,21 @@ where StandardNormal: Distribution<F> {
     DimWorld { items, agents }
 }
 
-pub fn test_multidim<const D: usize, F: num::Float + SampleUniform>(n: usize)
+pub fn test_multidim<const D: usize, F: num::Float + SampleUniform + Serialize + DeserializeOwned>(n: usize)
 where StandardNormal: Distribution<F> {
     let am = F::one() / F::from(D + 1).unwrap();
-    let world: DimWorld<D, F, _, _> = create_cb_world(n, std::array::from_fn(|_| Normal::new(F::from(0.5).unwrap(), F::from(0.1).unwrap()).unwrap()), std::array::from_fn(|_| Normal::new(am, am * F::from(0.1).unwrap()).unwrap()), Normal::new(F::from(100.0).unwrap(), F::from(50.0).unwrap()).unwrap());
+    let mut world: DimWorld<DimItem<D, F>, CDAgent<D, F>>;
 
     let settings = super::allocate::FractalSettings { epsilon: F::from(1e-8).unwrap(), max_iter: 400, constraint_price: F::zero() };
+
+    if let Ok(s) = fs::read_to_string("config_multidim.json") {
+        let ws: DimWorld<DimItemRecord<D, F>, CDAgentRecord<D, F>> = serde_json::from_str(s.as_str()).unwrap();
+        world = DimWorld::from_similar(ws);
+    } else {
+        world = create_cb_world(n, std::array::from_fn(|_| Normal::new(F::from(0.5).unwrap(), F::from(0.1).unwrap()).unwrap()), std::array::from_fn(|_| Normal::new(am, am * F::from(0.1).unwrap()).unwrap()), Normal::new(F::from(100.0).unwrap(), F::from(50.0).unwrap()).unwrap());
+        let ws: DimWorld<DimItemRecord<D, F>, CDAgentRecord<D, F>> = DimWorld::from_similar(world.clone());
+        fs::write("config_multidim.json", serde_json::to_string_pretty(&ws).unwrap()).unwrap();
+    }
 
     println!("Running algorithm (D={}, n={})", D, n);
     let mut allocations = super::allocate::root(world.agents, world.items, settings).unwrap();
